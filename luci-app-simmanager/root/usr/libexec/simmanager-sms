@@ -1,0 +1,298 @@
+#!/usr/bin/lua
+
+local fs = require "nixio.fs"
+local jsonc = require "luci.jsonc"
+local nixio = require "nixio"
+local uci = require "luci.model.uci".cursor()
+local sms = require "simmanager.sms"
+
+math.randomseed(os.time() + (nixio.getpid and nixio.getpid() or 0))
+
+local function response(payload, success)
+	payload = payload or {}
+	if payload.ok == nil then payload.ok = success ~= false end
+	io.write((jsonc.stringify(payload) or "{}") .. "\n")
+	os.exit(success == false and 1 or 0)
+end
+
+local function shell_quote(value)
+	return "'" .. tostring(value):gsub("'", "'\\''") .. "'"
+end
+
+local function active_slot()
+	local slot = uci:get("cellular", "cellular", "hw_sim")
+	if slot == "sim1" or slot == "sim2" then return slot end
+	return "unknown"
+end
+
+local function at_port()
+	local preferred = fs.stat("/dev/ttyUSB2")
+	if preferred and preferred.type == "chr" then return "/dev/ttyUSB2" end
+	local configured = uci:get("cellular", "cellular", "atdev")
+	local configured_stat = configured and configured:match("^/dev/ttyUSB%d+$") and fs.stat(configured) or nil
+	if configured_stat and configured_stat.type == "chr" then return configured end
+	return nil
+end
+
+local function at(command)
+	local port = at_port()
+	if not port then return nil, "Modem AT port is unavailable" end
+	local pipe = io.popen("timeout 12 at-cmd " .. shell_quote(port) .. " " .. shell_quote(command) .. " 2>&1", "r")
+	if not pipe then return nil, "Could not start modem command" end
+	local output = pipe:read("*a") or ""
+	local ok = pipe:close()
+	output = output:gsub("\r", "")
+	if not ok or output:find("%+CMS ERROR:") or output:find("%+CME ERROR:") or output:find("\nERROR%s*$") then
+		return nil, output:match("(%+CME ERROR:[^\n]+)") or output:match("(%+CMS ERROR:[^\n]+)") or "Modem rejected the SMS command"
+	end
+	return output
+end
+
+local function current_iccid(slot)
+	local output = at("AT+QCCID")
+	local value = output and output:match("%+QCCID:%s*([%x]+)") or nil
+	if value then return value end
+	local raw = fs.readfile("/tmp/4ginfo")
+	local cached = raw and jsonc.parse(raw) or nil
+	if type(cached) == "table" and cached.iccid and tostring(cached.iccid) ~= "" then return tostring(cached.iccid) end
+	return uci:get("simmanager", slot, "last_iccid") or "unknown"
+end
+
+local function parse_cmgl(raw, storage)
+	local records = {}
+	local pending
+	for line in tostring(raw or ""):gmatch("[^\n]+") do
+		line = line:match("^%s*(.-)%s*$")
+		local index, state = line:match("^%+CMGL:%s*(%d+),%s*([^,]+)")
+		if index then
+			pending = { index = tonumber(index), state = tostring(state):gsub('"', ''), storage = storage }
+		elseif pending and line:match("^[%x]+$") and #line >= 4 then
+			pending.pdu = line
+			local decoded = sms.decode_pdu(line)
+			if decoded then pending.decoded = decoded; records[#records + 1] = pending end
+			pending = nil
+		end
+	end
+	return records
+end
+
+local function select_storage(storage)
+	local output, err = at(string.format('AT+CPMS="%s","%s","%s"', storage, storage, storage))
+	return output ~= nil, err
+end
+
+local function delete_modem_record(storage, index)
+	local selected = select_storage(storage)
+	if not selected then return false end
+	return at("AT+CMGD=" .. tostring(index)) ~= nil
+end
+
+local function sync_active()
+	local slot = active_slot()
+	if slot == "unknown" then return nil, "Active SIM is unknown" end
+	local initialized = at("AT+QINISTAT")
+	local initialization_state = initialized and tonumber(initialized:match("%+QINISTAT:%s*(%d+)")) or nil
+	if initialization_state and initialization_state < 3 then
+		return nil, "SIM SMS service is still initializing"
+	end
+	local ok, err = at("AT+CMGF=0")
+	if not ok then return nil, err end
+	-- Store delivery reports in modem memory and emit only an index notification.
+	at("AT+CNMI=2,1,0,2,0")
+	local iccid = current_iccid(slot)
+	local imported = 0
+	local reports = 0
+	local skipped = 0
+	for _, storage in ipairs({ "ME", "SM" }) do
+		local selected = select_storage(storage)
+		if selected then
+			local raw = at("AT+CMGL=4")
+			local records = parse_cmgl(raw or "", storage)
+			local groups = sms.merge_parts(records)
+			local consumed = {}
+			for _, group in ipairs(groups) do
+				local decoded = group.decoded
+				local stored = false
+				if decoded.type == "report" then
+					stored = sms.update_delivery(slot, decoded.reference, decoded.status, os.time())
+					if stored then reports = reports + 1 end
+				elseif decoded.type == "received" then
+					local fingerprint = sms.fingerprint(iccid, decoded.pdu)
+					local message = {
+						direction = "received", number = decoded.number, text = decoded.text,
+						service_time = decoded.service_time, timestamp = os.time(),
+						-- A message is new to this application when it is first imported,
+						-- even if a previous modem listing changed its internal REC state.
+						read = false,
+						iccid = iccid, fingerprint = fingerprint, delivery_status = "received"
+					}
+					local added, _, created = sms.add(slot, message)
+					stored = added == true
+					if created then imported = imported + 1 end
+				end
+				if stored then
+					for _, record in ipairs(group.records) do consumed[record.storage .. ":" .. record.index] = record end
+				else
+					skipped = skipped + 1
+				end
+			end
+			for _, record in pairs(consumed) do delete_modem_record(record.storage, record.index) end
+		end
+	end
+	local data, counts = sms.list(slot)
+	return {
+		ok = true, slot = slot, iccid = iccid, imported = imported, delivery_reports = reports,
+		skipped = skipped, counts = counts, storage_full = counts.total >= sms.limit
+	}
+end
+
+local function drain(fd)
+	fd:setblocking(false)
+	for _ = 1, 8 do
+		local chunk = fd:read(4096)
+		if not chunk or #chunk == 0 then break end
+	end
+end
+
+local function write_all(fd, value)
+	local offset = 1
+	while offset <= #value do
+		local written, err = fd:write(value:sub(offset))
+		if not written then return nil, tostring(err or "serial write failed") end
+		offset = offset + written
+	end
+	return true
+end
+
+local function read_until(fd, patterns, timeout_seconds)
+	local output = ""
+	local deadline = os.time() + timeout_seconds
+	local events = nixio.poll_flags("in", "err", "hup")
+	while os.time() <= deadline do
+		local poll = { { fd = fd, events = events } }
+		nixio.poll(poll, 250)
+		local chunk = fd:read(4096)
+		if chunk and #chunk > 0 then
+			output = output .. chunk:gsub("\r", "")
+			for _, pattern in ipairs(patterns) do
+				if output:find(pattern) then return output, pattern end
+			end
+		end
+	end
+	return nil, "Timed out waiting for the modem", output
+end
+
+local function open_serial()
+	local port = at_port()
+	if not port then return nil, "Modem AT port is unavailable" end
+	os.execute("stty -F " .. shell_quote(port) .. " 115200 raw -echo -ixon -ixoff >/dev/null 2>&1")
+	local flags = nixio.open_flags("rdwr", "nonblock")
+	local fd, err = nixio.open(port, flags)
+	if not fd then return nil, tostring(err or "Could not open modem AT port") end
+	drain(fd)
+	return fd
+end
+
+local function send_pdu(fd, part)
+	local ok, err = write_all(fd, "AT+CMGF=0\r")
+	if not ok then return nil, err end
+	local ready, reason = read_until(fd, { "\nOK\n", "\nERROR\n", "%+CMS ERROR:" }, 5)
+	if not ready or not ready:find("\nOK\n") then return nil, reason or "Could not enable PDU mode" end
+	ok, err = write_all(fd, "AT+CMGS=" .. tostring(part.length) .. "\r")
+	if not ok then return nil, err end
+	local prompt, prompt_reason = read_until(fd, { ">", "\nERROR\n", "%+CMS ERROR:" }, 8)
+	if not prompt or not prompt:find(">", 1, true) then return nil, prompt_reason or "The modem did not accept the SMS" end
+	ok, err = write_all(fd, part.hex .. string.char(26))
+	if not ok then return nil, err end
+	local result, result_reason, partial = read_until(fd, { "%+CMGS:%s*%d+", "%+CMS ERROR:", "\nERROR\n" }, 45)
+	if not result then return nil, result_reason .. (partial and (": " .. partial) or "") end
+	local reference = result:match("%+CMGS:%s*(%d+)")
+	if not reference then return nil, result:match("%+CMS ERROR:[^\n]+") or "SMS sending failed" end
+	read_until(fd, { "\nOK\n", "\nERROR\n" }, 5)
+	return tonumber(reference)
+end
+
+local function send_message(slot, number, message_path)
+	if slot ~= active_slot() then return nil, "This SIM is inactive. Activate it before sending." end
+	if not sms.can_add(slot) then return nil, "SMS storage is full. Read or delete messages before sending." end
+	local text = fs.readfile(message_path)
+	if not text or text == "" then return nil, "Message is empty" end
+	if #text > 4096 then return nil, "Message is too long" end
+	local pdus, err = sms.encode_submit(number, text)
+	if not pdus then return nil, err end
+	local fd; fd, err = open_serial()
+	if not fd then return nil, err end
+	local references = {}
+	local send_error
+	for _, part in ipairs(pdus) do
+		local reference; reference, send_error = send_pdu(fd, part)
+		if not reference then break end
+		references[#references + 1] = reference
+	end
+	fd:close()
+	local iccid = current_iccid(slot)
+	local timestamp = os.time()
+	local status = send_error and "failed" or "sent"
+	local reference_status = {}
+	for _, reference in ipairs(references) do reference_status[tostring(reference)] = "sent" end
+	local added, add_error, created = sms.add(slot, {
+		direction = "sent", number = number, text = text, timestamp = timestamp, read = true,
+		iccid = iccid, fingerprint = sms.fingerprint(iccid, number, text, timestamp),
+		delivery_status = status, delivery_error = send_error, references = references,
+		reference_status = reference_status,
+		parts = #pdus
+	})
+	if not added then return nil, add_error end
+	return { ok = not send_error, slot = slot, references = references, parts = #pdus,
+		delivery_status = status, error = send_error, stored = created == true }
+end
+
+local action = arg[1] or "summary"
+
+if action == "summary" then
+	local active = active_slot()
+	local result = { ok = true, active_sim = active, limit = sms.limit, sims = {} }
+	for _, slot in ipairs({ "sim1", "sim2" }) do
+		local data, counts = sms.list(slot)
+		result.sims[slot] = { unread = counts.unread, total = counts.total, inbox = counts.inbox,
+			sent = counts.sent, iccid = data.iccid, active = slot == active }
+	end
+	response(result)
+elseif action == "list" then
+	local slot = arg[2]
+	if slot ~= "sim1" and slot ~= "sim2" then response({ error = "Invalid SIM slot" }, false) end
+	local data, counts = sms.list(slot)
+	response({ ok = true, slot = slot, active_sim = active_slot(), active = slot == active_slot(),
+		iccid = data.iccid, limit = sms.limit, counts = counts, messages = data.messages })
+elseif action == "sync" then
+	local result, err = sync_active()
+	if not result then response({ error = err }, false) end
+	response(result)
+elseif action == "send" then
+	local slot, number, path = arg[2], arg[3], arg[4]
+	if (slot ~= "sim1" and slot ~= "sim2") or not tostring(number or ""):match("^%+?%d%d%d+$") or
+		not tostring(path or ""):match("^/tmp/simmanager%-sms%-message%-%d+%-%d+$") then
+		response({ error = "Invalid SMS request" }, false)
+	end
+	local result, err = send_message(slot, number, path)
+	fs.unlink(path)
+	if not result then response({ error = err }, false) end
+	response(result, result.ok)
+elseif action == "mark" then
+	local slot, ids, state = arg[2], arg[3], arg[4]
+	if (slot ~= "sim1" and slot ~= "sim2") or not tostring(ids or ""):match("^[%w,_%-]+$") or
+		(state ~= "read" and state ~= "unread") then response({ error = "Invalid mark request" }, false) end
+	local ok, err, changed = sms.mark(slot, ids, state == "read")
+	if not ok then response({ error = err }, false) end
+	response({ ok = true, changed = changed })
+elseif action == "delete" then
+	local slot, ids = arg[2], arg[3]
+	if (slot ~= "sim1" and slot ~= "sim2") or not tostring(ids or ""):match("^[%w,_%-]+$") then
+		response({ error = "Invalid delete request" }, false)
+	end
+	local ok, err, removed = sms.delete(slot, ids)
+	if not ok then response({ error = err }, false) end
+	response({ ok = true, removed = removed })
+else
+	response({ error = "Unknown SMS action" }, false)
+end

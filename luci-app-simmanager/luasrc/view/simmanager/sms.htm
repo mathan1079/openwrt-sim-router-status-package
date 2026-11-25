@@ -1,0 +1,251 @@
+<%
+	local request_path = luci.dispatcher.context.requestpath or {}
+	local requested_page = request_path[#request_path]
+	local initial_slot = (requested_page == "sim2" or requested_page == "sim2sms") and "sim2" or "sim1"
+%>
+<%+header%>
+
+<style>
+.sms-toolbar,.sms-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.sms-toolbar{justify-content:space-between;margin:0 0 14px}
+.sms-bulk-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 12px;padding:8px 10px;border:1px solid #d8dce2;border-radius:6px;background:#fff}
+.sms-select-all{display:inline-flex;align-items:center;gap:7px;margin:0 8px 0 0;line-height:1;white-space:nowrap;cursor:pointer}
+.sms-select-all input{margin:0}
+.sms-bulk-toolbar .cbi-button{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;min-height:32px;margin:0;padding:5px 13px;border:1px solid #b8bec8;border-radius:4px;background:#f7f8fa;color:#344054;line-height:1.2;cursor:pointer}
+.sms-bulk-toolbar .cbi-button:hover{background:#edf1f5;border-color:#98a2b3}
+.sms-bulk-toolbar .cbi-button-negative{border-color:#d92d20;background:#d92d20;color:#fff}
+.sms-bulk-toolbar .cbi-button-negative:hover{border-color:#b42318;background:#b42318}
+.sms-badge{display:inline-block;min-width:18px;padding:1px 6px;margin-left:5px;border-radius:10px;background:#d92d20;color:#fff;font-size:.75rem;text-align:center}
+.sms-badge:empty{display:none}
+.sms-banner{padding:11px 14px;margin-bottom:14px;border-left:4px solid #2b7de9;background:#eef6ff}
+.sms-banner.inactive{border-color:#f0a020;background:#fff8e8}
+.sms-summary{display:grid;grid-template-columns:repeat(4,minmax(110px,1fr));gap:10px;margin-bottom:14px}
+.sms-summary-card{border:1px solid #d8dce2;border-radius:6px;background:#fff;padding:11px 13px}
+.sms-summary-card>span{display:block;color:#667085;font-size:.82rem}.sms-summary-card strong{display:flex;align-items:baseline;gap:4px;font-size:1.25rem;white-space:nowrap}.sms-summary-card strong span{display:inline;color:inherit;font-size:inherit}
+.sms-controls{display:grid;grid-template-columns:minmax(180px,1fr) auto;gap:10px;margin-bottom:12px}
+.sms-controls input{box-sizing:border-box;width:100%}
+.sms-list{border:1px solid #d8dce2;border-radius:6px;background:#fff;overflow:hidden}
+.sms-message{display:grid;grid-template-columns:auto minmax(150px,220px) minmax(200px,1fr) minmax(145px,auto) auto;align-items:center;gap:12px;padding:12px 14px;border-top:1px solid #edf0f3;cursor:pointer}
+.sms-message:hover{background:#f8fafc}.sms-message.unread:hover{background:#edf6ff}.sms-message input{cursor:default}
+.sms-message:first-child{border-top:0}.sms-message.unread{background:#f4f9ff}.sms-message.unread .sms-party,.sms-message.unread .sms-preview{font-weight:600}
+.sms-preview{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.sms-meta{color:#667085;font-size:.84rem;text-align:right}.sms-status{font-size:.78rem;border-radius:12px;padding:3px 8px;background:#eef1f5;white-space:nowrap}.sms-status.delivered{background:#dff6e8;color:#08783e}.sms-status.failed{background:#fff1f0;color:#b42318}.sms-status.sent{background:#eef6ff;color:#175cd3}
+.sms-empty{padding:32px;text-align:center;color:#667085}.sms-icon-button{border:0;background:transparent;cursor:pointer;color:#175cd3;padding:5px}
+.sms-dialog-backdrop{display:none;position:fixed;inset:0;z-index:1000;background:rgba(15,23,42,.55);padding:20px;align-items:center;justify-content:center}.sms-dialog-backdrop.open{display:flex}
+.sms-dialog{box-sizing:border-box;width:min(650px,100%);max-height:calc(100vh - 40px);overflow:auto;background:#fff;border:1px solid #e4e7ec;border-radius:10px;padding:24px;box-shadow:0 20px 45px rgba(0,0,0,.28)}
+.sms-dialog h3{margin:0 0 14px}.sms-field{margin-bottom:13px}.sms-field label{display:block;font-weight:600;margin-bottom:5px}.sms-field input,.sms-field textarea{box-sizing:border-box;width:100%}.sms-field textarea{min-height:150px;resize:vertical}.sms-dialog-actions{display:flex;justify-content:flex-end;align-items:center;gap:8px;margin-top:18px;padding-top:14px;border-top:1px solid #e4e7ec}.sms-dialog-actions .cbi-button{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;min-height:34px;margin:0;padding:6px 14px;border:1px solid #b8bec8;border-radius:4px;background:#f7f8fa;color:#344054;line-height:1.2;cursor:pointer}.sms-dialog-actions .cbi-button:hover{background:#edf1f5;border-color:#98a2b3}.sms-dialog-actions .cbi-button-apply{border-color:#1aa3d2;background:#4fb9dc;color:#fff}.sms-dialog-actions .cbi-button-apply:hover{border-color:#138db8;background:#32a8d0}.sms-detail-text{box-sizing:border-box;width:100%;white-space:pre-wrap;overflow-wrap:anywhere;margin-top:10px;padding:14px 16px;border:1px solid #e4e7ec;background:#f8fafc;border-radius:6px;min-height:88px;line-height:1.5}.sms-error{color:#b42318}.sms-muted{color:#667085}
+@media(max-width:900px){.sms-message{grid-template-columns:auto 1fr auto}.sms-preview{grid-column:2/4;white-space:normal}.sms-meta{grid-column:2;text-align:left}.sms-message .sms-status{grid-column:3}}
+@media(max-width:600px){.sms-summary{grid-template-columns:repeat(2,1fr)}.sms-controls{grid-template-columns:1fr}.sms-message{grid-template-columns:auto 1fr}.sms-message .sms-status{grid-column:2}.sms-meta{grid-column:2}.sms-actions{width:100%}.sms-actions button{flex:1}.sms-bulk-toolbar{align-items:stretch}.sms-select-all{width:100%;min-height:30px}.sms-bulk-toolbar .cbi-button{flex:1}}
+</style>
+
+<h2><% if initial_slot == "sim2" then %><%:SIM 2 SMS%><% else %><%:SIM 1 SMS%><% end %> <span id="sms-total-unread" class="sms-badge"></span></h2>
+
+<div class="sms-toolbar">
+	<div class="sms-actions">
+		<button id="sms-compose" class="cbi-button cbi-button-apply" disabled><%:New message%></button>
+	</div>
+	<span id="sms-service-state" class="sms-muted"><%:Loading messages…%></span>
+</div>
+
+<div id="sms-banner" class="sms-banner"></div>
+
+<div class="sms-summary">
+	<div class="sms-summary-card"><span><%:Unread%></span><strong id="sms-count-unread">0</strong></div>
+	<div class="sms-summary-card"><span><%:Inbox%></span><strong id="sms-count-inbox">0</strong></div>
+	<div class="sms-summary-card"><span><%:Sent%></span><strong id="sms-count-sent">0</strong></div>
+	<div class="sms-summary-card"><span><%:Stored%></span><strong><span id="sms-count-total">0</span> / <span id="sms-limit">150</span></strong></div>
+</div>
+
+<div class="sms-controls">
+	<input id="sms-search" type="search" placeholder="<%:Search number or message%>">
+	<select id="sms-filter">
+		<option value="all"><%:All messages%></option>
+		<option value="received"><%:Inbox%></option>
+		<option value="sent"><%:Sent%></option>
+		<option value="unread"><%:Unread%></option>
+	</select>
+</div>
+
+<div class="sms-bulk-toolbar">
+	<label class="sms-select-all"><input id="sms-select-all" type="checkbox"><span><%:Select all%></span></label>
+	<button id="sms-mark-read" class="cbi-button"><%:Mark read%></button>
+	<button id="sms-mark-unread" class="cbi-button"><%:Mark unread%></button>
+	<button id="sms-delete" class="cbi-button cbi-button-negative"><%:Delete selected%></button>
+</div>
+
+<div id="sms-list" class="sms-list"><div class="sms-empty"><%:Loading messages…%></div></div>
+
+<div id="sms-compose-backdrop" class="sms-dialog-backdrop">
+	<div class="sms-dialog" role="dialog" aria-modal="true" aria-labelledby="sms-compose-title">
+		<h3 id="sms-compose-title"><%:New message%></h3>
+		<p id="sms-compose-note" class="sms-muted"></p>
+		<div class="sms-field"><label for="sms-number"><%:Phone number%></label><input id="sms-number" type="tel" maxlength="20" placeholder="+919876543210"></div>
+		<div class="sms-field"><label for="sms-text"><%:Message%></label><textarea id="sms-text" maxlength="4096"></textarea><span id="sms-length" class="sms-muted">0</span></div>
+		<div id="sms-compose-error" class="sms-error"></div>
+		<div class="sms-dialog-actions"><button id="sms-compose-cancel" class="cbi-button"><%:Cancel%></button><button id="sms-send" class="cbi-button cbi-button-apply"><%:Send message%></button></div>
+	</div>
+</div>
+
+<div id="sms-detail-backdrop" class="sms-dialog-backdrop">
+	<div class="sms-dialog" role="dialog" aria-modal="true" aria-labelledby="sms-detail-title">
+		<h3 id="sms-detail-title"><%:Message%></h3>
+		<p id="sms-detail-meta" class="sms-muted"></p>
+		<div id="sms-detail-text" class="sms-detail-text"></div>
+		<div class="sms-dialog-actions"><button id="sms-detail-close" class="cbi-button"><%:Close%></button><button id="sms-detail-unread" class="cbi-button"><%:Mark unread%></button><button id="sms-detail-reply" class="cbi-button cbi-button-apply"><%:Reply%></button><button id="sms-detail-resend" class="cbi-button cbi-button-apply"><%:Resend%></button></div>
+	</div>
+</div>
+
+<script type="text/javascript">
+//<![CDATA[
+(function() {
+	var token = '<%=token%>';
+	var initialSlot = '<%=initial_slot%>';
+	var urls = {
+		summary: '<%=luci.dispatcher.build_url("admin", "network", "simmanager", "sms_summary")%>',
+		list: '<%=luci.dispatcher.build_url("admin", "network", "simmanager", "sms_list")%>',
+		send: '<%=luci.dispatcher.build_url("admin", "network", "simmanager", "sms_send")%>',
+		mark: '<%=luci.dispatcher.build_url("admin", "network", "simmanager", "sms_mark")%>',
+		remove: '<%=luci.dispatcher.build_url("admin", "network", "simmanager", "sms_delete")%>'
+	};
+	var currentSlot = initialSlot;
+	var activeSim = 'unknown';
+	var messages = [];
+	var visibleMessages = [];
+	var currentDetail = null;
+
+	function parse(xhr, data) { if (data) return data; try { return JSON.parse(xhr.responseText); } catch (e) { return {}; } }
+	function setBadge(id, value) { var el = document.getElementById(id); if (el) el.textContent = Number(value) > 0 ? String(value) : ''; }
+	function formatTime(epoch, fallback) {
+		var date = new Date(Number(epoch) * 1000); if (!Number(epoch) || isNaN(date.getTime())) return fallback || 'N/A';
+		return new Intl.DateTimeFormat(undefined, { year:'numeric',month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:true }).format(date);
+	}
+	function escapeSelector(value) { return String(value).replace(/(["\\])/g, '\\$1'); }
+
+	function updateMenuBadge(slot, total) {
+		var links = document.querySelectorAll('a[href]');
+		for (var i = 0; i < links.length; i++) {
+			var pattern = slot === 'sim2' ? /\/sim2sms\/?$/ : /\/sim1sms\/?$/;
+			if (!pattern.test(links[i].getAttribute('href') || '')) continue;
+			var old = links[i].querySelector('.sms-menu-count'); if (old) old.remove();
+			if (total > 0) { var badge = document.createElement('span'); badge.className = 'sms-badge sms-menu-count'; badge.textContent = total; links[i].appendChild(badge); }
+		}
+	}
+
+	function loadSummary(done) {
+		XHR.get(urls.summary, null, function(xhr, data) {
+			data = parse(xhr, data); var sims = data.sims || {};
+			activeSim = data.active_sim || 'unknown';
+			var one = (sims.sim1 || {}).unread || 0, two = (sims.sim2 || {}).unread || 0;
+			setBadge('sms-total-unread', (sims[currentSlot] || {}).unread || 0); updateMenuBadge('sim1', one); updateMenuBadge('sim2', two);
+			if (done) done(data);
+		});
+	}
+
+	function selectedIds() {
+		var ids = [], checks = document.querySelectorAll('.sms-select:checked');
+		for (var i = 0; i < checks.length; i++) ids.push(checks[i].value); return ids;
+	}
+
+	function deliveryLabel(status) {
+		return {received:'<%:Received%>',sending:'<%:Sending%>',sent:'<%:Sent%>',delivered:'<%:Delivered%>',failed:'<%:Failed%>'}[status] || '<%:Unknown%>';
+	}
+
+	function applyFilter() {
+		var filter = document.getElementById('sms-filter').value;
+		var search = document.getElementById('sms-search').value.toLowerCase();
+		visibleMessages = messages.filter(function(message) {
+			if (filter === 'received' && message.direction !== 'received') return false;
+			if (filter === 'sent' && message.direction !== 'sent') return false;
+			if (filter === 'unread' && (message.direction !== 'received' || message.read === true)) return false;
+			return !search || String(message.number || '').toLowerCase().indexOf(search) >= 0 || String(message.text || '').toLowerCase().indexOf(search) >= 0;
+		});
+		renderList();
+	}
+
+	function renderList() {
+		var list = document.getElementById('sms-list'); list.textContent = '';
+		if (!visibleMessages.length) { var empty = document.createElement('div'); empty.className = 'sms-empty'; empty.textContent = '<%:No messages found.%>'; list.appendChild(empty); return; }
+		visibleMessages.forEach(function(message) {
+			var row = document.createElement('div'); row.className = 'sms-message' + (message.direction === 'received' && message.read !== true ? ' unread' : ''); row.setAttribute('data-id', message.id); row.setAttribute('data-open', message.id); row.setAttribute('tabindex', '0');
+			var check = document.createElement('input'); check.type = 'checkbox'; check.className = 'sms-select'; check.value = message.id;
+			var party = document.createElement('div'); party.className = 'sms-party'; party.textContent = message.number || '<%:Unknown number%>';
+			var preview = document.createElement('button'); preview.type = 'button'; preview.className = 'sms-icon-button sms-preview'; preview.textContent = message.text || '<%:Empty message%>'; preview.setAttribute('data-open', message.id);
+			var meta = document.createElement('div'); meta.className = 'sms-meta'; meta.textContent = formatTime(message.timestamp, message.service_time);
+			var status = document.createElement('span'); status.className = 'sms-status ' + (message.delivery_status || ''); status.textContent = message.direction === 'received' ? (message.read === true ? '<%:Read%>' : '<%:Unread%>') : deliveryLabel(message.delivery_status);
+			row.appendChild(check); row.appendChild(party); row.appendChild(preview); row.appendChild(meta); row.appendChild(status); list.appendChild(row);
+		});
+	}
+
+	function renderData(data) {
+		messages = data.messages || []; activeSim = data.active_sim || activeSim;
+		var counts = data.counts || {};
+		document.getElementById('sms-count-unread').textContent = counts.unread || 0; document.getElementById('sms-count-inbox').textContent = counts.inbox || 0;
+		document.getElementById('sms-count-sent').textContent = counts.sent || 0; document.getElementById('sms-count-total').textContent = counts.total || 0; document.getElementById('sms-limit').textContent = data.limit || 150;
+		var banner = document.getElementById('sms-banner');
+		if (data.active) { banner.className = 'sms-banner'; banner.textContent = currentSlot.toUpperCase() + ' — <%:Active. New messages can be received and sent.%>'; }
+		else { banner.className = 'sms-banner inactive'; banner.textContent = currentSlot.toUpperCase() + ' — <%:Showing stored messages. Activate this SIM to receive new messages or send a reply.%>'; }
+		document.getElementById('sms-compose').disabled = !data.active;
+		document.getElementById('sms-service-state').textContent = data.active ? '<%:Auto-syncing active SIM every 10 seconds.%>' : '<%:Stored history — auto-sync starts when this SIM becomes active.%>';
+		applyFilter(); loadSummary();
+	}
+
+	function loadMessages() {
+		XHR.get(urls.list, { slot: currentSlot }, function(xhr, data) { data = parse(xhr, data); if (data.ok === false) { document.getElementById('sms-service-state').textContent = data.error || '<%:Could not load messages.%>'; return; } renderData(data); });
+	}
+
+	function post(url, values, callback) {
+		values.token = token; XHR.post(url, values, function(xhr, data) { data = parse(xhr, data); if (callback) callback(data); });
+	}
+
+	function mark(ids, state, callback) { if (!ids.length) return; post(urls.mark, { slot:currentSlot,ids:ids.join(','),state:state }, function(data) { if (data.ok === false) alert(data.error); loadMessages(); if (callback) callback(); }); }
+	function remove(ids) { if (!ids.length || !window.confirm('<%:Delete the selected stored messages?%>')) return; post(urls.remove, { slot:currentSlot,ids:ids.join(',') }, function(data) { if (data.ok === false) alert(data.error); loadMessages(); }); }
+
+	function openCompose(number) {
+		if (currentSlot !== activeSim) { alert('<%:Activate this SIM before sending a message.%>'); return; }
+		document.getElementById('sms-number').value = number || ''; document.getElementById('sms-text').value = ''; document.getElementById('sms-compose-error').textContent = ''; document.getElementById('sms-length').textContent = '0';
+		document.getElementById('sms-compose-note').textContent = '<%:Sending from%>' + ' ' + currentSlot.toUpperCase() + '. <%:Long messages may use multiple SMS parts.%>';
+		document.getElementById('sms-compose-backdrop').classList.add('open'); document.getElementById(number ? 'sms-text' : 'sms-number').focus();
+	}
+	function closeCompose() { document.getElementById('sms-compose-backdrop').classList.remove('open'); }
+
+	function openDetail(id) {
+		currentDetail = null; for (var i = 0; i < messages.length; i++) if (messages[i].id === id) currentDetail = messages[i]; if (!currentDetail) return;
+		document.getElementById('sms-detail-title').textContent = currentDetail.direction === 'received' ? '<%:Message from%> ' + (currentDetail.number || '') : '<%:Message to%> ' + (currentDetail.number || '');
+		document.getElementById('sms-detail-meta').textContent = formatTime(currentDetail.timestamp, currentDetail.service_time) + ' — ' + (currentDetail.direction === 'received' ? (currentDetail.read === true ? '<%:Read%>' : '<%:Unread%>') : deliveryLabel(currentDetail.delivery_status));
+		document.getElementById('sms-detail-text').textContent = currentDetail.text || ''; document.getElementById('sms-detail-reply').style.display = currentDetail.direction === 'received' ? '' : 'none'; document.getElementById('sms-detail-reply').disabled = currentSlot !== activeSim;
+		var canResend = currentDetail.direction === 'sent' && currentDetail.delivery_status === 'failed' && currentSlot === activeSim; document.getElementById('sms-detail-resend').style.display = canResend ? '' : 'none'; document.getElementById('sms-detail-resend').disabled = !canResend;
+		document.getElementById('sms-detail-unread').style.display = currentDetail.direction === 'received' ? '' : 'none'; document.getElementById('sms-detail-backdrop').classList.add('open');
+		if (currentDetail.direction === 'received' && currentDetail.read !== true) mark([currentDetail.id], 'read');
+	}
+
+	document.getElementById('sms-search').addEventListener('input', applyFilter); document.getElementById('sms-filter').addEventListener('change', applyFilter);
+	document.getElementById('sms-select-all').addEventListener('change', function() { var checks = document.querySelectorAll('.sms-select'); for (var i = 0; i < checks.length; i++) checks[i].checked = this.checked; });
+	document.getElementById('sms-mark-read').addEventListener('click', function() { mark(selectedIds(), 'read'); }); document.getElementById('sms-mark-unread').addEventListener('click', function() { mark(selectedIds(), 'unread'); }); document.getElementById('sms-delete').addEventListener('click', function() { remove(selectedIds()); });
+	document.getElementById('sms-list').addEventListener('click', function(event) { if (event.target && event.target.tagName === 'INPUT') return; var row = event.target.closest ? event.target.closest('.sms-message') : null; if (row && row.getAttribute('data-open')) openDetail(row.getAttribute('data-open')); });
+	document.getElementById('sms-list').addEventListener('keydown', function(event) { if (event.key !== 'Enter' && event.key !== ' ') return; var row = event.target.closest ? event.target.closest('.sms-message') : null; if (!row || !row.getAttribute('data-open')) return; event.preventDefault(); openDetail(row.getAttribute('data-open')); });
+	document.getElementById('sms-compose').addEventListener('click', function() { openCompose(''); }); document.getElementById('sms-compose-cancel').addEventListener('click', closeCompose);
+	document.getElementById('sms-text').addEventListener('input', function() { document.getElementById('sms-length').textContent = this.value.length + ' <%:characters%>'; });
+	document.getElementById('sms-send').addEventListener('click', function() {
+		var button = this, number = document.getElementById('sms-number').value.trim(), text = document.getElementById('sms-text').value; document.getElementById('sms-compose-error').textContent = '';
+		if (!/^\+?\d{3,20}$/.test(number) || !text) { document.getElementById('sms-compose-error').textContent = '<%:Enter a valid phone number and message.%>'; return; }
+		button.disabled = true; button.textContent = '<%:Sending…%>'; post(urls.send, { slot:currentSlot,number:number,message:text }, function(data) { button.disabled = false; button.textContent = '<%:Send message%>'; if (data.ok === false) { document.getElementById('sms-compose-error').textContent = data.error || '<%:Message could not be sent.%>'; return; } closeCompose(); loadMessages(); });
+	});
+	document.getElementById('sms-detail-close').addEventListener('click', function() { document.getElementById('sms-detail-backdrop').classList.remove('open'); });
+	document.getElementById('sms-detail-unread').addEventListener('click', function() { if (currentDetail) mark([currentDetail.id], 'unread', function() { document.getElementById('sms-detail-backdrop').classList.remove('open'); }); });
+	document.getElementById('sms-detail-reply').addEventListener('click', function() { if (!currentDetail) return; var number = currentDetail.number; document.getElementById('sms-detail-backdrop').classList.remove('open'); openCompose(number); });
+	document.getElementById('sms-detail-resend').addEventListener('click', function() {
+		if (!currentDetail || currentDetail.direction !== 'sent' || currentDetail.delivery_status !== 'failed' || currentSlot !== activeSim) return;
+		var button = this, number = currentDetail.number, text = currentDetail.text; button.disabled = true; button.textContent = '<%:Resending…%>';
+		post(urls.send, { slot:currentSlot,number:number,message:text }, function(data) {
+			button.textContent = '<%:Resend%>'; button.disabled = false;
+			if (data.ok === false) { alert(data.error || '<%:Message could not be resent.%>'); loadMessages(); return; }
+			document.getElementById('sms-detail-backdrop').classList.remove('open'); loadMessages();
+		});
+	});
+
+	loadSummary(function() { loadMessages(); });
+	window.setInterval(loadMessages, 10000);
+})();
+//]]>
+</script>
+
+<%+footer%>

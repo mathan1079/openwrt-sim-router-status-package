@@ -1,0 +1,36 @@
+<script type="text/javascript">
+//<![CDATA[
+(function() {
+	function pad(value) {
+		return value < 10 ? '0' + value : String(value);
+	}
+
+	function timezoneName(date) {
+		try {
+			var parts = new Intl.DateTimeFormat(undefined, { timeZoneName: 'short' }).formatToParts(date);
+			for (var i = 0; i < parts.length; i++) {
+				if (parts[i].type === 'timeZoneName') return parts[i].value;
+			}
+		} catch (e) {}
+		return '';
+	}
+
+	window.simmanagerFormatLocalTime = window.simmanagerFormatLocalTime || function(epoch) {
+		var date = new Date(Number(epoch) * 1000);
+		if (!Number(epoch) || isNaN(date.getTime())) return 'N/A';
+		var hours = date.getHours();
+		var suffix = hours >= 12 ? 'PM' : 'AM';
+		var hour12 = hours % 12 || 12;
+		var zone = timezoneName(date);
+		return date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate()) +
+			' ' + pad(hour12) + ':' + pad(date.getMinutes()) + ':' + pad(date.getSeconds()) +
+			' ' + suffix + (zone ? ' ' + zone : '');
+	};
+
+	var nodes = document.querySelectorAll('.simmanager-local-time[data-epoch]');
+	for (var i = 0; i < nodes.length; i++) {
+		nodes[i].textContent = window.simmanagerFormatLocalTime(nodes[i].getAttribute('data-epoch'));
+	}
+})();
+//]]>
+</script>

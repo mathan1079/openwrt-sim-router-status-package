@@ -69,14 +69,18 @@ local function add_profile(section_name, title)
 	local last_band = section:option(DummyValue, "last_band", translate("Last known serving bands"))
 	last_band.default = translate("Not observed yet")
 	local last_seen = section:option(DummyValue, "last_seen", translate("Last observed"))
+	last_seen.rawhtml = true
 	function last_seen.cfgvalue(self, section_id)
-		local value = self.map:get(section_id, self.option)
-		return value and os.date("%Y-%m-%d %H:%M:%S", tonumber(value)) or translate("Not observed yet")
+		local value = tonumber(self.map:get(section_id, self.option))
+		return value and value > 0 and string.format('<span class="simmanager-local-time" data-epoch="%d"></span>', value) or translate("Not observed yet")
 	end
 end
 
 add_profile("sim1", translate("SIM 1"))
 add_profile("sim2", translate("SIM 2"))
+
+local local_time = map:section(SimpleSection)
+local_time.template = "simmanager/local_time"
 
 return map
 

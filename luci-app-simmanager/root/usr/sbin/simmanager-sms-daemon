@@ -1,0 +1,6 @@
+#!/bin/sh
+
+while :; do
+	/usr/sbin/simmanager-sms sync >/dev/null 2>&1
+	sleep 10
+done

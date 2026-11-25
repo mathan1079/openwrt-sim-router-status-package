@@ -1,6 +1,6 @@
 # LuCI SIM Manager
 
-A standalone LuCI application for the vendor OpenWrt 21.02 RM500U firmware. It provides a live dashboard and independent SIM 1/SIM 2 profile storage, but it does not switch SIMs, apply APNs, restart the modem, or edit the vendor `cellular` configuration.
+A standalone LuCI application for the vendor OpenWrt 21.02 RM500U firmware. Its dashboards are read-only, it stores independent SIM 1/SIM 2 profiles, and all optional switching is isolated behind explicit manual confirmation or a separately enabled guarded failover policy.
 
 ## Current features
 
@@ -21,7 +21,17 @@ A standalone LuCI application for the vendor OpenWrt 21.02 RM500U firmware. It p
 - Standalone IPK build, install and uninstall targets.
 - No vendor files are replaced.
 - Explicit, CSRF-protected activation with persistent pre-change backups and automatic rollback on failure.
+- Optional automatic failover is disabled by default, runs three interface-bound probes in parallel every five seconds, uses a 20-second failure default, detects reconnect loops, and retries the selected primary SIM after 6, 12, 18 and 24 hours.
+- Fast failover is the default: recovery of the failing SIM before switching is optional and disabled because it can extend client downtime by one or more minutes.
+- Automatic failover cannot be enabled while the vendor `cellular.cellular.hw_asw` controller is active. A vendor `cellular` configuration change immediately reloads this service; if the vendor controller was enabled, package automation cancels further work, rolls back an in-progress automatic activation when necessary, clears its own enable flag and startup entry, and stops.
+- Manual activations retain a selectable five-checkpoint rollback history. Older package-created backup directories remain untouched even after they leave the five-entry UI history.
+- Automatic operations use a separate private checkpoint captured immediately before each algorithm-driven change. A standby SIM that fails registration or Internet verification restores that exact pre-switch SIM and cellular configuration without consuming or replacing manual rollback points.
 - Emergency LAN rollback command: `/usr/sbin/simmanager-control rollback`.
+- Active-SIM SMS inbox and sending support using the RM500U secondary AT port, with separate persistent SIM 1/SIM 2 histories.
+- SMS menu and per-SIM unread counts, inbox/sent filters, search, read/unread controls, reply, single or bulk deletion, and a 150-message limit per SIM.
+- PDU-mode Unicode and multipart sending with requested network delivery reports. Delivery is shown as sent, delivered, failed, or unavailable according to carrier feedback.
+- The active SIM is synchronized every ten seconds. Messages are committed locally before their modem copies are removed; inactive SIM histories remain available until that SIM is activated again.
+- Dashboard, activation and SMS operations share one modem lock so command responses and interactive SMS prompts cannot overlap.
 
 The collector queries `AT+CNUM`, but this SIM/modem currently returns `CME ERROR: 4`. The dashboard therefore uses a vendor-provided MSISDN if one appears in `/tmp/4ginfo`; otherwise it labels and displays the phone number stored in the active SIM profile.
 
@@ -32,7 +42,7 @@ make verify
 make build
 ```
 
-The package is written to `dist/luci-app-simmanager_1.0.0-1_all.ipk`.
+The package is written to `dist/luci-app-simmanager_<version>-1_all.ipk`.
 
 ## Install and uninstall
 
@@ -45,7 +55,7 @@ make uninstall
 
 The install target uses legacy SCP mode (`scp -O`) because this OpenWrt image does not provide an SFTP server.
 
-Installation adds only files owned by this package, including its independent `/etc/config/simmanager` file. It does not invoke `/etc/init.d/cellular reload` and does not change `/etc/config/cellular` or `/etc/config/hw_info`. Modified profile configuration is treated as an opkg conffile and may be retained by opkg after uninstall.
+Installation adds only files owned by this package, including its independent `/etc/config/simmanager` file. Upgrades add a missing automation section in the disabled state without replacing existing profiles. Installation does not start failover, invoke `/etc/init.d/cellular reload`, or change `/etc/config/cellular` or `/etc/config/hw_info`. Modified profile configuration is treated as an opkg conffile and may be retained by opkg after uninstall.
 
 To use another router:
 
@@ -63,8 +73,8 @@ The activation implementation must be reviewed and installed separately before u
 
 ## Source layout
 
-- `luci-app-simmanager/luasrc` - LuCI controller, dashboard and CBI profile editor.
-- `luci-app-simmanager/root` - package-owned UCI defaults and ACL metadata.
+- `luci-app-simmanager/luasrc` - LuCI controller, dashboards, profile editor and automatic-switching policy page.
+- `luci-app-simmanager/root` - package-owned UCI defaults, status collectors and guarded switching services.
 - `scripts/build-ipk.sh` - standalone architecture-independent IPK builder using the gzip-compressed tar format accepted by this OpenWrt 21.02 `opkg` build.
 - `scripts/verify.sh` - non-invasive source/package checks.
 

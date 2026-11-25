@@ -5,6 +5,7 @@ cache=/tmp/simmanager-status.json
 cache_new=/tmp/simmanager-status.json.new
 stamp=/tmp/simmanager-status.timestamp
 lock=/tmp/simmanager-status.lock
+at_lock=/tmp/simmanager-at.lock
 ttl=8
 
 if [ -f "$cache" ] && [ -f "$stamp" ]; then
@@ -27,6 +28,14 @@ query_port=/dev/ttyUSB3
 [ -c "$query_port" ] || query_port="$primary"
 
 if [ ! -c "$query_port" ]; then
+	[ -f "$cache" ] && cat "$cache" || printf '{}\n'
+	exit 0
+fi
+
+# Never interleave status queries with SMS prompt handling or activation checks.
+# If another operation owns the modem, return the last cache immediately.
+exec 9>"$at_lock"
+if ! flock -x -n 9; then
 	[ -f "$cache" ] && cat "$cache" || printf '{}\n'
 	exit 0
 fi

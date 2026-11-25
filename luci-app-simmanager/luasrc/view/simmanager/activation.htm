@@ -16,7 +16,23 @@
 .simmanager-row:first-of-type { border-top: 0; }
 .simmanager-muted { color: #667085; }
 .simmanager-error { color: #b42318; }
+.simmanager-history { display: grid; gap: 8px; margin-top: 10px; }
+.simmanager-history-item { display: grid; grid-template-columns: minmax(150px, 1fr) minmax(180px, 2fr) auto; align-items: center; gap: 12px; border: 1px solid #e1e5eb; border-radius: 5px; padding: 10px 12px; }
+.simmanager-history-item button { margin: 0; }
+.simmanager-dialog-backdrop { display: none; position: fixed; inset: 0; z-index: 1000; background: rgba(15, 23, 42, .55); padding: 20px; align-items: center; justify-content: center; }
+.simmanager-dialog-backdrop.open { display: flex; }
+.simmanager-dialog { width: min(680px, 100%); max-height: calc(100vh - 40px); overflow: auto; border-radius: 8px; background: #fff; box-shadow: 0 20px 45px rgba(0, 0, 0, .28); padding: 20px; }
+.simmanager-dialog h3 { margin: 0 0 8px; }
+.simmanager-dialog-warning { padding: 10px 12px; border-left: 4px solid #d92d20; background: #fff1f0; margin: 14px 0; }
+.simmanager-dialog-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
+.simmanager-dialog-option { border: 1px solid #d8dce2; border-radius: 6px; padding: 13px 14px; background: #f8fafc; }
+.simmanager-dialog-option h4 { margin: 0 0 6px; font-size: 1rem; }
+.simmanager-dialog-option p { margin: 0; color: #5f6b7a; line-height: 1.45; }
+.simmanager-dialog-buttons { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
+.simmanager-dialog-buttons .cbi-button { box-sizing: border-box; width: 100%; min-height: 42px; margin: 0; padding: 8px 12px; white-space: normal; line-height: 1.25; }
+.simmanager-dialog-actions { display: flex; justify-content: flex-end; margin-top: 14px; }
 @media (max-width: 800px) { .simmanager-control-grid { grid-template-columns: 1fr; } }
+@media (max-width: 600px) { .simmanager-history-item, .simmanager-dialog-options, .simmanager-dialog-buttons { grid-template-columns: 1fr; } }
 </style>
 
 <h2><%:Activate SIM Profile & Roll Back%></h2>
@@ -51,9 +67,36 @@
 	<div class="simmanager-row"><span><%:Current active SIM%></span><strong id="control-active">—</strong></div>
 	<div class="simmanager-row"><span><%:State%></span><strong id="control-state">Idle</strong></div>
 	<div class="simmanager-row"><span><%:Message%></span><span id="control-message">No activation has been started.</span></div>
-	<div class="simmanager-row"><span><%:Last backup%></span><span id="control-backup">N/A</span></div>
-	<button id="control-rollback" class="cbi-button cbi-button-negative" disabled><%:Roll back to last backup%></button>
-	<p class="simmanager-muted"><%:Emergency LAN recovery command: /usr/sbin/simmanager-control rollback%></p>
+	<div class="simmanager-row"><span><%:Last operation checkpoint%></span><span id="control-backup">N/A</span></div>
+	<h4><%:Manual rollback history%></h4>
+	<p class="simmanager-muted"><%:The five most recent manual activation checkpoints are listed below. Automatic checkpoints are kept separately and never replace this history.%></p>
+	<div id="manual-history" class="simmanager-history"><span class="simmanager-muted"><%:No manual rollback checkpoints are available.%></span></div>
+	<p class="simmanager-muted"><%:Emergency LAN commands: /usr/sbin/simmanager-control history and /usr/sbin/simmanager-control rollback manual CHECKPOINT_ID%></p>
+</div>
+
+<div id="activation-dialog-backdrop" class="simmanager-dialog-backdrop" role="presentation">
+	<div class="simmanager-dialog" role="dialog" aria-modal="true" aria-labelledby="activation-dialog-title">
+		<h3 id="activation-dialog-title"><%:Switch SIM%></h3>
+		<p><%:Choose what automatic switching should do after this manual switch.%></p>
+		<div class="simmanager-dialog-warning"><%:The cellular connection will be interrupted temporarily while the profile is applied.%></div>
+		<div class="simmanager-dialog-options">
+			<div class="simmanager-dialog-option">
+				<h4><%:Keep automatic switching on%></h4>
+				<p id="activation-keep-description"><%:Use this SIM now. The router can switch SIMs again later using your automatic rules.%></p>
+			</div>
+			<div class="simmanager-dialog-option">
+				<h4><%:Turn automatic switching off%></h4>
+				<p id="activation-disable-description"><%:Use this SIM and stop automatic SIM changes until you enable them again.%></p>
+			</div>
+		</div>
+		<div class="simmanager-dialog-buttons">
+			<button type="button" id="activation-keep-auto" class="cbi-button cbi-button-apply"><%:Switch & Keep Auto On%></button>
+			<button type="button" id="activation-disable-auto" class="cbi-button cbi-button-negative"><%:Switch & Turn Auto Off%></button>
+		</div>
+		<div class="simmanager-dialog-actions">
+			<button type="button" id="activation-cancel" class="cbi-button"><%:Cancel%></button>
+		</div>
+	</div>
 </div>
 
 <script type="text/javascript">
@@ -61,11 +104,29 @@
 (function() {
 	var token = '<%=token%>';
 	var profileUrl = '<%=luci.dispatcher.build_url("admin", "network", "simmanager", "status")%>';
+
+	function formatLocalTime(epoch) {
+		var date = new Date(Number(epoch) * 1000);
+		if (!Number(epoch) || isNaN(date.getTime())) return 'N/A';
+		function pad(value) { return value < 10 ? '0' + value : String(value); }
+		var hours = date.getHours();
+		var zone = '';
+		try {
+			var parts = new Intl.DateTimeFormat(undefined, { timeZoneName: 'short' }).formatToParts(date);
+			for (var i = 0; i < parts.length; i++) if (parts[i].type === 'timeZoneName') zone = parts[i].value;
+		} catch (e) {}
+		return date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate()) +
+			' ' + pad(hours % 12 || 12) + ':' + pad(date.getMinutes()) + ':' + pad(date.getSeconds()) +
+			' ' + (hours >= 12 ? 'PM' : 'AM') + (zone ? ' ' + zone : '');
+	}
 	var statusUrl = '<%=luci.dispatcher.build_url("admin", "network", "simmanager", "control_status")%>';
 	var activateUrl = '<%=luci.dispatcher.build_url("admin", "network", "simmanager", "activate")%>';
 	var rollbackUrl = '<%=luci.dispatcher.build_url("admin", "network", "simmanager", "rollback")%>';
 
 	var profilesLoaded = false;
+	var automationEnabled = false;
+	var automationDefaultSim = 'sim1';
+	var pendingTarget = null;
 
 	function setBusy(busy) {
 		var buttons = document.querySelectorAll('[data-target]');
@@ -86,6 +147,8 @@
 
 	function renderProfiles(data) {
 		var sims = (data && data.sims) || {};
+		automationEnabled = data && data.automation_enabled === true;
+		automationDefaultSim = (data && data.automation_default_sim) || 'sim1';
 		['sim1', 'sim2'].forEach(function(key) {
 			var sim = sims[key] || {};
 			var container = document.getElementById('profile-' + key);
@@ -105,14 +168,47 @@
 
 	function renderStatus(data) {
 		data = data || {};
+		if (typeof data.automation_enabled === 'boolean') automationEnabled = data.automation_enabled;
+		if (data.automation_default_sim) automationDefaultSim = data.automation_default_sim;
 		document.getElementById('control-active').textContent = (data.active_sim || 'unknown').toUpperCase();
 		updateActiveCard(data.active_sim);
 		document.getElementById('control-state').textContent = data.state || 'idle';
 		document.getElementById('control-message').textContent = data.message || 'No activation has been started.';
-		document.getElementById('control-backup').textContent = data.backup || 'N/A';
+		var kind = data.backup_kind && data.backup_kind !== 'unknown' ? (' (' + data.backup_kind + ')') : '';
+		document.getElementById('control-backup').textContent = data.backup ? data.backup + kind : 'N/A';
 		var busy = ['validating', 'backing_up', 'applying', 'switching', 'waiting', 'rolling_back'].indexOf(data.state) >= 0;
 		setBusy(busy);
-		document.getElementById('control-rollback').disabled = busy || data.rollback_available !== '1';
+		renderManualHistory(data.manual_backups || [], busy);
+	}
+
+	function renderManualHistory(backups, busy) {
+		var container = document.getElementById('manual-history');
+		container.textContent = '';
+		if (!backups.length) {
+			var empty = document.createElement('span');
+			empty.className = 'simmanager-muted';
+			empty.textContent = '<%:No manual rollback checkpoints are available.%>';
+			container.appendChild(empty);
+			return;
+		}
+		backups.slice(0, 5).forEach(function(backup, index) {
+			var item = document.createElement('div');
+			item.className = 'simmanager-history-item';
+			var title = document.createElement('strong');
+			title.textContent = '<%:Checkpoint%>' + ' ' + (index + 1);
+			var detail = document.createElement('span');
+			var created = Number(backup.created_at) ? formatLocalTime(backup.created_at) : backup.id;
+			detail.textContent = created + ' — ' + String(backup.active_sim || 'unknown').toUpperCase() + ' → ' + String(backup.target_sim || 'unknown').toUpperCase();
+			var button = document.createElement('button');
+			button.className = 'cbi-button cbi-button-negative';
+			button.textContent = '<%:Restore this checkpoint%>';
+			button.disabled = busy;
+			button.setAttribute('data-backup-id', backup.id || '');
+			item.appendChild(title);
+			item.appendChild(detail);
+			item.appendChild(button);
+			container.appendChild(item);
+		});
 	}
 
 	function updateActiveCard(activeSim) {
@@ -137,21 +233,65 @@
 		});
 	}
 
+	function closeActivationDialog() {
+		document.getElementById('activation-dialog-backdrop').classList.remove('open');
+		pendingTarget = null;
+	}
+
+	function openActivationDialog(target) {
+		pendingTarget = target;
+		var targetLabel = target.toUpperCase();
+		var defaultLabel = automationDefaultSim.toUpperCase();
+		document.getElementById('activation-dialog-title').textContent = '<%:Switch to%>' + ' ' + targetLabel;
+		document.getElementById('activation-keep-description').textContent =
+			'<%:Use this SIM now. Automatic switching stays on and can return to the default SIM%>' +
+			' (' + defaultLabel + ') ' + '<%:later.%>';
+		document.getElementById('activation-disable-description').textContent =
+			'<%:Use this SIM and turn automatic switching off. The router will not change SIMs automatically.%>';
+		document.getElementById('activation-dialog-backdrop').classList.add('open');
+	}
+
+	function submitActivation(automationAction) {
+		if (!pendingTarget) return;
+		var target = pendingTarget;
+		closeActivationDialog();
+		setBusy(true);
+		post(activateUrl, {
+			target: target,
+			automation_action: automationAction,
+			confirmation: 'SWITCH-' + target.toUpperCase() + '-' + automationAction.toUpperCase()
+		});
+	}
+
 	var buttons = document.querySelectorAll('[data-target]');
 	for (var i = 0; i < buttons.length; i++) {
 		buttons[i].addEventListener('click', function() {
 			var target = this.getAttribute('data-target');
-			var label = target.toUpperCase();
-			var warning = '<%:This will back up the current cellular configuration, apply the selected profile, and temporarily interrupt mobile connectivity.%>';
-			if (window.confirm(warning + '\n\n' + '<%:Continue with%>' + ' ' + label + '?')) {
-				post(activateUrl, { target: target, confirmation: 'SWITCH-' + label });
+			if (automationEnabled) {
+				openActivationDialog(target);
+				return;
+			}
+			var warning = '<%:This will back up the current cellular configuration, apply the selected profile, and temporarily interrupt mobile connectivity. Automatic switching is disabled and will remain disabled.%>';
+			if (window.confirm(warning + '\n\n' + '<%:Continue with%>' + ' ' + target.toUpperCase() + '?')) {
+				pendingTarget = target;
+				submitActivation('keep');
 			}
 		});
 	}
 
-	document.getElementById('control-rollback').addEventListener('click', function() {
-		if (window.confirm('<%:Restore the previous cellular configuration and active SIM from the last backup? Mobile connectivity will be interrupted.%>')) {
-			post(rollbackUrl, { confirmation: 'ROLLBACK' });
+	document.getElementById('activation-keep-auto').addEventListener('click', function() { submitActivation('keep'); });
+	document.getElementById('activation-disable-auto').addEventListener('click', function() { submitActivation('disable'); });
+	document.getElementById('activation-cancel').addEventListener('click', closeActivationDialog);
+	document.getElementById('activation-dialog-backdrop').addEventListener('click', function(event) {
+		if (event.target === this) closeActivationDialog();
+	});
+
+	document.getElementById('manual-history').addEventListener('click', function(event) {
+		var button = event.target.closest ? event.target.closest('[data-backup-id]') : event.target;
+		if (!button || !button.getAttribute('data-backup-id')) return;
+		var backupId = button.getAttribute('data-backup-id');
+		if (window.confirm('<%:Restore this manual checkpoint and its previous active SIM? Mobile connectivity will be interrupted.%>')) {
+			post(rollbackUrl, { backup_id: backupId, confirmation: 'ROLLBACK-' + backupId });
 		}
 	});
 

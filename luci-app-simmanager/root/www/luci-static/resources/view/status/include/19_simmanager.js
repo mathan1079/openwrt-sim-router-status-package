@@ -11,6 +11,21 @@ function present(value) {
 	return value !== null && value !== undefined && value !== '';
 }
 
+function formatLocalTime(epoch) {
+	var date = new Date(Number(epoch) * 1000);
+	if (!Number(epoch) || isNaN(date.getTime())) return 'N/A';
+	function pad(value) { return value < 10 ? '0' + value : String(value); }
+	var hours = date.getHours();
+	var zone = '';
+	try {
+		var parts = new Intl.DateTimeFormat(undefined, { timeZoneName: 'short' }).formatToParts(date);
+		for (var i = 0; i < parts.length; i++) if (parts[i].type === 'timeZoneName') zone = parts[i].value;
+	} catch (e) {}
+	return date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate()) +
+		' ' + pad(hours % 12 || 12) + ':' + pad(date.getMinutes()) + ':' + pad(date.getSeconds()) +
+		' ' + (hours >= 12 ? 'PM' : 'AM') + (zone ? ' ' + zone : '');
+}
+
 function text(value, fallback) {
 	return present(value) ? String(value) : (fallback || 'N/A');
 }
@@ -59,7 +74,7 @@ function simCard(sim, key) {
 	var configuredApn = sim.apn_auto === '1' ? _('Automatic') : text(sim.profile_apn);
 	var preferredBands = sim.band_auto === '1' ? _('Automatic') : text(sim.bands);
 	var observed = present(sim.last_seen)
-		? new Date(Number(sim.last_seen) * 1000).toLocaleString()
+		? formatLocalTime(sim.last_seen)
 		: null;
 
 	var rows = [
@@ -147,7 +162,7 @@ return baseclass.extend({
 				row(_('SIM status'), data.sim_status),
 				row(_('Status port'), data.query_port),
 				row(_('Scan mode'), data.scan_mode),
-				row(_('Status updated'), present(data.updated_at) ? new Date(Number(data.updated_at) * 1000).toLocaleString() : null)
+				row(_('Status updated'), present(data.updated_at) ? formatLocalTime(data.updated_at) : null)
 			])
 		]);
 

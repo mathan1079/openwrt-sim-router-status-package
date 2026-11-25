@@ -107,6 +107,21 @@
 		return value !== null && value !== undefined && String(value).trim() !== '';
 	}
 
+	function formatLocalTime(epoch) {
+		var date = new Date(Number(epoch) * 1000);
+		if (!Number(epoch) || isNaN(date.getTime())) return 'N/A';
+		function pad(value) { return value < 10 ? '0' + value : String(value); }
+		var hours = date.getHours();
+		var zone = '';
+		try {
+			var parts = new Intl.DateTimeFormat(undefined, { timeZoneName: 'short' }).formatToParts(date);
+			for (var i = 0; i < parts.length; i++) if (parts[i].type === 'timeZoneName') zone = parts[i].value;
+		} catch (e) {}
+		return date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate()) +
+			' ' + pad(hours % 12 || 12) + ':' + pad(date.getMinutes()) + ':' + pad(date.getSeconds()) +
+			' ' + (hours >= 12 ? 'PM' : 'AM') + (zone ? ' ' + zone : '');
+	}
+
 	function displayValue(field, data) {
 		var value = data[field];
 		if (field === 'active_sim' && present(value)) {
@@ -133,7 +148,7 @@
 		if (field === 'supported_wcdma_bands' && present(value)) return String(value).split(':').map(function(b) { return 'B' + b; }).join(', ');
 		if (field === 'supported_lte_bands' && present(value)) return String(value).split(':').map(function(b) { return 'B' + b; }).join(', ');
 		if ((field === 'supported_nsa_5g_bands' || field === 'supported_sa_5g_bands') && present(value)) return String(value).split(':').map(function(b) { return 'n' + b; }).join(', ');
-		if (field === 'updated_at' && present(value)) return new Date(Number(value) * 1000).toLocaleString();
+		if (field === 'updated_at' && present(value)) return formatLocalTime(value);
 		return present(value) ? value : 'N/A';
 	}
 
@@ -182,7 +197,7 @@
 			addSlotRow(card, '<%:Preferred bands%>', sim.band_auto === '1' ? '<%:Automatic%>' : sim.bands);
 			addSlotRow(card, sim.active ? '<%:Live signal%>' : '<%:Last known signal%>', present(sim.signal_percent) ? sim.signal_percent + '%' : waiting);
 			addSlotRow(card, sim.active ? '<%:Current bands%>' : '<%:Last known bands%>', sim.current_band || waiting);
-			if (!sim.active && sim.last_known && present(sim.last_seen)) addSlotRow(card, '<%:Last observed%>', new Date(Number(sim.last_seen) * 1000).toLocaleString());
+			if (!sim.active && sim.last_known && present(sim.last_seen)) addSlotRow(card, '<%:Last observed%>', formatLocalTime(sim.last_seen));
 			container.appendChild(card);
 		});
 		container.style.display = 'grid';

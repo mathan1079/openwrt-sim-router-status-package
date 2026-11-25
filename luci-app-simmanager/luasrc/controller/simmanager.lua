@@ -115,10 +115,19 @@ function index()
 	entry({"admin", "network", "simmanager", "dashboard"}, template("simmanager/dashboard"), _("Dashboard"), 1)
 	entry({"admin", "network", "simmanager", "profiles"}, cbi("simmanager/profiles"), _("SIM Profiles"), 2)
 	entry({"admin", "network", "simmanager", "activation"}, template("simmanager/activation"), _("Activate / Roll Back"), 3)
+	entry({"admin", "network", "simmanager", "automation"}, cbi("simmanager/automation"), _("Automatic Switching"), 4)
+	entry({"admin", "network", "sim1sms"}, template("simmanager/sms"), _("SIM 1 SMS"), 17)
+	entry({"admin", "network", "sim2sms"}, template("simmanager/sms"), _("SIM 2 SMS"), 18)
 	entry({"admin", "network", "simmanager", "status"}, call("action_status")).leaf = true
 	entry({"admin", "network", "simmanager", "control_status"}, call("action_control_status")).leaf = true
 	entry({"admin", "network", "simmanager", "activate"}, post("action_activate")).leaf = true
 	entry({"admin", "network", "simmanager", "rollback"}, post("action_rollback")).leaf = true
+	entry({"admin", "network", "simmanager", "sms_summary"}, call("action_sms_summary")).leaf = true
+	entry({"admin", "network", "simmanager", "sms_list"}, call("action_sms_list")).leaf = true
+	entry({"admin", "network", "simmanager", "sms_sync"}, post("action_sms_sync")).leaf = true
+	entry({"admin", "network", "simmanager", "sms_send"}, post("action_sms_send")).leaf = true
+	entry({"admin", "network", "simmanager", "sms_mark"}, post("action_sms_mark")).leaf = true
+	entry({"admin", "network", "simmanager", "sms_delete"}, post("action_sms_delete")).leaf = true
 end
 
 local function write_json(payload)
@@ -147,6 +156,8 @@ function action_status()
 	local payload = {
 		available = next(status) ~= nil or next(live) ~= nil,
 		read_only = true,
+		automation_enabled = uci:get("simmanager", "automation", "enabled") == "1",
+		automation_default_sim = uci:get("simmanager", "automation", "default_sim") or "sim1",
 		updated_at = stat and stat.mtime or nil,
 		active_sim = active_sim,
 		active_sim_title = uci:get("hw_info", "cellular", active_sim == "sim2" and "s2_title" or "s_title"),
@@ -275,37 +286,145 @@ function action_control_status()
 	local sys = require "luci.sys"
 	local uci = require "luci.model.uci".cursor()
 	local payload = jsonc.parse(sys.exec("/usr/sbin/simmanager-control status 2>/dev/null")) or {}
+	local history = jsonc.parse(sys.exec("/usr/sbin/simmanager-control history 2>/dev/null")) or {}
 	payload.active_sim = uci:get("cellular", "cellular", "hw_sim") or "unknown"
+	payload.automation_enabled = uci:get("simmanager", "automation", "enabled") == "1"
+	payload.automation_default_sim = uci:get("simmanager", "automation", "default_sim") or "sim1"
+	payload.manual_backups = type(history.backups) == "table" and history.backups or {}
 	write_json(payload)
 end
 
 function action_activate()
 	local http = require "luci.http"
 	local sys = require "luci.sys"
+	local uci = require "luci.model.uci".cursor()
 	local target = http.formvalue("target")
 	local confirmation = http.formvalue("confirmation")
+	local automation_action = http.formvalue("automation_action")
 
-	if (target ~= "sim1" and target ~= "sim2") or confirmation ~= ("SWITCH-" .. string.upper(target or "")) then
+	if (target ~= "sim1" and target ~= "sim2") or
+		(automation_action ~= "keep" and automation_action ~= "disable") or
+		confirmation ~= ("SWITCH-" .. string.upper(target or "") .. "-" .. string.upper(automation_action or "")) then
 		http.status(400, "Bad Request")
-		write_json({ accepted = false, error = "Invalid target or confirmation" })
+		write_json({ accepted = false, error = "Invalid target, automatic-switch choice, or confirmation" })
 		return
 	end
 
-	local rc = sys.call("/usr/sbin/simmanager-control activate " .. target .. " >/dev/null 2>&1 &")
-	write_json({ accepted = rc == 0, target = target })
+	if automation_action == "disable" then
+		uci:set("simmanager", "automation", "enabled", "0")
+		uci:commit("simmanager")
+		sys.call("/etc/init.d/simmanager-auto stop >/dev/null 2>&1")
+		sys.call("/etc/init.d/simmanager-auto disable >/dev/null 2>&1")
+	end
+
+	local request_mode = automation_action == "keep" and "manual-keep" or "manual-disable"
+	local rc = sys.call("/usr/sbin/simmanager-control activate " .. target .. " " .. request_mode .. " >/dev/null 2>&1 &")
+	write_json({ accepted = rc == 0, target = target, automation_action = automation_action })
 end
 
 function action_rollback()
 	local http = require "luci.http"
 	local sys = require "luci.sys"
+	local backup_id = http.formvalue("backup_id") or ""
+	local valid_id = backup_id:match("^%d%d%d%d%d%d%d%d%-%d%d%d%d%d%d%-%d+$") ~= nil
 
-	if http.formvalue("confirmation") ~= "ROLLBACK" then
+	if not valid_id or http.formvalue("confirmation") ~= ("ROLLBACK-" .. backup_id) then
 		http.status(400, "Bad Request")
-		write_json({ accepted = false, error = "Invalid rollback confirmation" })
+		write_json({ accepted = false, error = "Invalid manual rollback checkpoint or confirmation" })
 		return
 	end
 
-	local rc = sys.call("/usr/sbin/simmanager-control rollback >/dev/null 2>&1 &")
-	write_json({ accepted = rc == 0 })
+	local rc = sys.call("/usr/sbin/simmanager-control rollback manual " .. backup_id .. " >/dev/null 2>&1 &")
+	write_json({ accepted = rc == 0, backup_id = backup_id })
+end
+
+local function sms_command(arguments)
+	local jsonc = require "luci.jsonc"
+	local sys = require "luci.sys"
+	local raw = sys.exec("/usr/sbin/simmanager-sms " .. arguments .. " 2>/dev/null")
+	local payload = jsonc.parse(raw or "")
+	if type(payload) ~= "table" then
+		return { ok = false, error = "SMS service did not return a valid response" }
+	end
+	return payload
+end
+
+local function valid_sms_slot(slot)
+	return slot == "sim1" or slot == "sim2"
+end
+
+local function valid_sms_ids(ids)
+	return type(ids) == "string" and #ids <= 8192 and ids:match("^[%w,_%-]+$") ~= nil
+end
+
+function action_sms_summary()
+	write_json(sms_command("summary"))
+end
+
+function action_sms_list()
+	local http = require "luci.http"
+	local slot = http.formvalue("slot")
+	if not valid_sms_slot(slot) then
+		http.status(400, "Bad Request")
+		write_json({ ok = false, error = "Invalid SIM slot" })
+		return
+	end
+	write_json(sms_command("list " .. slot))
+end
+
+function action_sms_sync()
+	write_json(sms_command("sync"))
+end
+
+function action_sms_send()
+	local http = require "luci.http"
+	local fs = require "nixio.fs"
+	local nixio = require "nixio"
+	local slot = http.formvalue("slot")
+	local number = trim(http.formvalue("number") or "")
+	local message = http.formvalue("message") or ""
+
+	if not valid_sms_slot(slot) or not number:match("^%+?%d%d%d+$") or #number > 20 or
+		message == "" or #message > 4096 then
+		http.status(400, "Bad Request")
+		write_json({ ok = false, error = "Enter a valid phone number and message" })
+		return
+	end
+
+	local path = string.format("/tmp/simmanager-sms-message-%d-%d", nixio.getpid(), os.time())
+	if not fs.writefile(path, message) then
+		http.status(500, "Internal Server Error")
+		write_json({ ok = false, error = "Could not prepare the message" })
+		return
+	end
+	local payload = sms_command(string.format("send %s %s %s", slot, number, path))
+	fs.unlink(path)
+	if payload.ok == false then http.status(409, "Conflict") end
+	write_json(payload)
+end
+
+function action_sms_mark()
+	local http = require "luci.http"
+	local slot = http.formvalue("slot")
+	local ids = http.formvalue("ids")
+	local state = http.formvalue("state")
+	if not valid_sms_slot(slot) or not valid_sms_ids(ids) or (state ~= "read" and state ~= "unread") then
+		http.status(400, "Bad Request")
+		write_json({ ok = false, error = "Invalid mark request" })
+		return
+	end
+	write_json(sms_command(string.format("mark %s %s %s", slot, ids, state)))
+end
+
+function action_sms_delete()
+	local http = require "luci.http"
+	local slot = http.formvalue("slot")
+	local ids = http.formvalue("ids")
+	if not valid_sms_slot(slot) or not valid_sms_ids(ids) then
+		http.status(400, "Bad Request")
+		write_json({ ok = false, error = "Invalid delete request" })
+		return
+	end
+	write_json(sms_command(string.format("delete %s %s", slot, ids)))
 end
 
