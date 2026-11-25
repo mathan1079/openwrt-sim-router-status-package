@@ -115,6 +115,7 @@ function index()
 	entry({"admin", "network", "simmanager", "dashboard"}, template("simmanager/dashboard"), _("Dashboard"), 1)
 	entry({"admin", "network", "simmanager", "profiles"}, cbi("simmanager/profiles"), _("SIM Profiles"), 2)
 	entry({"admin", "network", "simmanager", "activation"}, template("simmanager/activation"), _("Activate / Roll Back"), 3)
+	entry({"admin", "network", "simmanager", "automation"}, cbi("simmanager/automation"), _("Automatic Switching"), 4)
 	entry({"admin", "network", "simmanager", "status"}, call("action_status")).leaf = true
 	entry({"admin", "network", "simmanager", "control_status"}, call("action_control_status")).leaf = true
 	entry({"admin", "network", "simmanager", "activate"}, post("action_activate")).leaf = true
@@ -275,7 +276,9 @@ function action_control_status()
 	local sys = require "luci.sys"
 	local uci = require "luci.model.uci".cursor()
 	local payload = jsonc.parse(sys.exec("/usr/sbin/simmanager-control status 2>/dev/null")) or {}
+	local history = jsonc.parse(sys.exec("/usr/sbin/simmanager-control history 2>/dev/null")) or {}
 	payload.active_sim = uci:get("cellular", "cellular", "hw_sim") or "unknown"
+	payload.manual_backups = type(history.backups) == "table" and history.backups or {}
 	write_json(payload)
 end
 
@@ -298,14 +301,16 @@ end
 function action_rollback()
 	local http = require "luci.http"
 	local sys = require "luci.sys"
+	local backup_id = http.formvalue("backup_id") or ""
+	local valid_id = backup_id:match("^%d%d%d%d%d%d%d%d%-%d%d%d%d%d%d%-%d+$") ~= nil
 
-	if http.formvalue("confirmation") ~= "ROLLBACK" then
+	if not valid_id or http.formvalue("confirmation") ~= ("ROLLBACK-" .. backup_id) then
 		http.status(400, "Bad Request")
-		write_json({ accepted = false, error = "Invalid rollback confirmation" })
+		write_json({ accepted = false, error = "Invalid manual rollback checkpoint or confirmation" })
 		return
 	end
 
-	local rc = sys.call("/usr/sbin/simmanager-control rollback >/dev/null 2>&1 &")
-	write_json({ accepted = rc == 0 })
+	local rc = sys.call("/usr/sbin/simmanager-control rollback manual " .. backup_id .. " >/dev/null 2>&1 &")
+	write_json({ accepted = rc == 0, backup_id = backup_id })
 end
 

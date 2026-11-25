@@ -1,5 +1,5 @@
 PACKAGE := luci-app-simmanager
-VERSION ?= 1.1.8
+VERSION ?= 1.3.1
 RELEASE ?= 1
 ROUTER ?= mathansims-local
 SCP_FLAGS ?= -O

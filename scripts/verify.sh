@@ -4,13 +4,18 @@ set -eu
 project_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 controller="$project_dir/luci-app-simmanager/luasrc/controller/simmanager.lua"
 profiles="$project_dir/luci-app-simmanager/luasrc/model/cbi/simmanager/profiles.lua"
+automation="$project_dir/luci-app-simmanager/luasrc/model/cbi/simmanager/automation.lua"
 
 test -f "$controller"
 test -f "$profiles"
+test -f "$automation"
 test -f "$project_dir/luci-app-simmanager/luasrc/view/simmanager/dashboard.htm"
 test -f "$project_dir/luci-app-simmanager/root/etc/config/simmanager"
 test -f "$project_dir/luci-app-simmanager/luasrc/view/simmanager/activation.htm"
+test -f "$project_dir/luci-app-simmanager/luasrc/view/simmanager/automation_style.htm"
 test -f "$project_dir/luci-app-simmanager/root/usr/sbin/simmanager-control"
+test -f "$project_dir/luci-app-simmanager/root/usr/sbin/simmanager-auto"
+test -f "$project_dir/luci-app-simmanager/root/etc/init.d/simmanager-auto"
 test -f "$project_dir/luci-app-simmanager/root/www/luci-static/resources/view/status/include/19_simmanager.js"
 
 if grep -R -nE '(/etc/init\.d/cellular (reload|restart)|cellular_sw|uci (set|commit) cellular)' \
@@ -33,10 +38,14 @@ if grep -nE 'AT\+(CFUN|CGDCONT=|COPS=|QCFG=.*,[0-9]|QICSGP=.*[,])' \
 fi
 
 if command -v luac >/dev/null 2>&1; then
-	luac -p "$controller" "$profiles"
+	luac -p "$controller" "$profiles" "$automation"
 fi
 
 sh -n "$project_dir/luci-app-simmanager/root/usr/sbin/simmanager-status"
 sh -n "$project_dir/luci-app-simmanager/root/usr/sbin/simmanager-control"
+sh -n "$project_dir/luci-app-simmanager/root/usr/sbin/simmanager-auto"
+sh -n "$project_dir/luci-app-simmanager/root/etc/init.d/simmanager-auto"
+sh "$project_dir/tests/test-auto-policy.sh"
+sh "$project_dir/tests/test-backup-policy.sh"
 
 echo "Safety and syntax checks passed"

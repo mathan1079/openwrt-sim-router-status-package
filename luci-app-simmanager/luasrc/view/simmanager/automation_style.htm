@@ -1,0 +1,89 @@
+<style>
+#cbi-simmanager {
+	--simmanager-label-width: 310px;
+	--simmanager-control-width: 720px;
+}
+
+#cbi-simmanager .cbi-section {
+	box-sizing: border-box;
+}
+
+#cbi-simmanager .cbi-value {
+	display: grid !important;
+	grid-template-columns: minmax(220px, var(--simmanager-label-width)) minmax(0, var(--simmanager-control-width));
+	column-gap: 24px;
+	align-items: start;
+	padding: 11px 16px !important;
+	margin: 0 !important;
+}
+
+#cbi-simmanager .cbi-value-title {
+	box-sizing: border-box;
+	float: none !important;
+	width: auto !important;
+	padding: 7px 0 0 !important;
+	text-align: left !important;
+	line-height: 1.35;
+}
+
+#cbi-simmanager .cbi-value-field {
+	box-sizing: border-box;
+	float: none !important;
+	width: 100% !important;
+	min-width: 0;
+	margin: 0 !important;
+	padding: 0 !important;
+	text-align: left !important;
+	overflow-wrap: anywhere;
+}
+
+#cbi-simmanager .cbi-value-field > input[type="text"],
+#cbi-simmanager .cbi-value-field > input[type="number"],
+#cbi-simmanager .cbi-value-field > select {
+	box-sizing: border-box;
+	width: 100% !important;
+	max-width: 100% !important;
+}
+
+#cbi-simmanager .cbi-value-description {
+	display: block;
+	box-sizing: border-box;
+	width: 100%;
+	margin: 8px 0 0 !important;
+	line-height: 1.45;
+	text-align: left !important;
+	white-space: normal;
+}
+
+#cbi-simmanager .cbi-section-descr {
+	max-width: 1054px;
+	line-height: 1.5;
+}
+
+#cbi-simmanager .cbi-page-actions {
+	margin-top: 18px;
+}
+
+@media (max-width: 1100px) {
+	#cbi-simmanager {
+		--simmanager-label-width: 260px;
+		--simmanager-control-width: minmax(0, 1fr);
+	}
+
+	#cbi-simmanager .cbi-value {
+		grid-template-columns: minmax(210px, 260px) minmax(0, 1fr);
+	}
+}
+
+@media (max-width: 760px) {
+	#cbi-simmanager .cbi-value {
+		grid-template-columns: minmax(0, 1fr);
+		row-gap: 7px;
+		padding: 11px 10px !important;
+	}
+
+	#cbi-simmanager .cbi-value-title {
+		padding-top: 0 !important;
+	}
+}
+</style>

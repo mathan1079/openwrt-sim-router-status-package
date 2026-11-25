@@ -16,7 +16,11 @@
 .simmanager-row:first-of-type { border-top: 0; }
 .simmanager-muted { color: #667085; }
 .simmanager-error { color: #b42318; }
+.simmanager-history { display: grid; gap: 8px; margin-top: 10px; }
+.simmanager-history-item { display: grid; grid-template-columns: minmax(150px, 1fr) minmax(180px, 2fr) auto; align-items: center; gap: 12px; border: 1px solid #e1e5eb; border-radius: 5px; padding: 10px 12px; }
+.simmanager-history-item button { margin: 0; }
 @media (max-width: 800px) { .simmanager-control-grid { grid-template-columns: 1fr; } }
+@media (max-width: 600px) { .simmanager-history-item { grid-template-columns: 1fr; } }
 </style>
 
 <h2><%:Activate SIM Profile & Roll Back%></h2>
@@ -51,9 +55,11 @@
 	<div class="simmanager-row"><span><%:Current active SIM%></span><strong id="control-active">—</strong></div>
 	<div class="simmanager-row"><span><%:State%></span><strong id="control-state">Idle</strong></div>
 	<div class="simmanager-row"><span><%:Message%></span><span id="control-message">No activation has been started.</span></div>
-	<div class="simmanager-row"><span><%:Last backup%></span><span id="control-backup">N/A</span></div>
-	<button id="control-rollback" class="cbi-button cbi-button-negative" disabled><%:Roll back to last backup%></button>
-	<p class="simmanager-muted"><%:Emergency LAN recovery command: /usr/sbin/simmanager-control rollback%></p>
+	<div class="simmanager-row"><span><%:Last operation checkpoint%></span><span id="control-backup">N/A</span></div>
+	<h4><%:Manual rollback history%></h4>
+	<p class="simmanager-muted"><%:The five most recent manual activation checkpoints are listed below. Automatic checkpoints are kept separately and never replace this history.%></p>
+	<div id="manual-history" class="simmanager-history"><span class="simmanager-muted"><%:No manual rollback checkpoints are available.%></span></div>
+	<p class="simmanager-muted"><%:Emergency LAN commands: /usr/sbin/simmanager-control history and /usr/sbin/simmanager-control rollback manual CHECKPOINT_ID%></p>
 </div>
 
 <script type="text/javascript">
@@ -109,10 +115,41 @@
 		updateActiveCard(data.active_sim);
 		document.getElementById('control-state').textContent = data.state || 'idle';
 		document.getElementById('control-message').textContent = data.message || 'No activation has been started.';
-		document.getElementById('control-backup').textContent = data.backup || 'N/A';
+		var kind = data.backup_kind && data.backup_kind !== 'unknown' ? (' (' + data.backup_kind + ')') : '';
+		document.getElementById('control-backup').textContent = data.backup ? data.backup + kind : 'N/A';
 		var busy = ['validating', 'backing_up', 'applying', 'switching', 'waiting', 'rolling_back'].indexOf(data.state) >= 0;
 		setBusy(busy);
-		document.getElementById('control-rollback').disabled = busy || data.rollback_available !== '1';
+		renderManualHistory(data.manual_backups || [], busy);
+	}
+
+	function renderManualHistory(backups, busy) {
+		var container = document.getElementById('manual-history');
+		container.textContent = '';
+		if (!backups.length) {
+			var empty = document.createElement('span');
+			empty.className = 'simmanager-muted';
+			empty.textContent = '<%:No manual rollback checkpoints are available.%>';
+			container.appendChild(empty);
+			return;
+		}
+		backups.slice(0, 5).forEach(function(backup, index) {
+			var item = document.createElement('div');
+			item.className = 'simmanager-history-item';
+			var title = document.createElement('strong');
+			title.textContent = '<%:Checkpoint%>' + ' ' + (index + 1);
+			var detail = document.createElement('span');
+			var created = Number(backup.created_at) ? new Date(Number(backup.created_at) * 1000).toLocaleString() : backup.id;
+			detail.textContent = created + ' — ' + String(backup.active_sim || 'unknown').toUpperCase() + ' → ' + String(backup.target_sim || 'unknown').toUpperCase();
+			var button = document.createElement('button');
+			button.className = 'cbi-button cbi-button-negative';
+			button.textContent = '<%:Restore this checkpoint%>';
+			button.disabled = busy;
+			button.setAttribute('data-backup-id', backup.id || '');
+			item.appendChild(title);
+			item.appendChild(detail);
+			item.appendChild(button);
+			container.appendChild(item);
+		});
 	}
 
 	function updateActiveCard(activeSim) {
@@ -149,9 +186,12 @@
 		});
 	}
 
-	document.getElementById('control-rollback').addEventListener('click', function() {
-		if (window.confirm('<%:Restore the previous cellular configuration and active SIM from the last backup? Mobile connectivity will be interrupted.%>')) {
-			post(rollbackUrl, { confirmation: 'ROLLBACK' });
+	document.getElementById('manual-history').addEventListener('click', function(event) {
+		var button = event.target.closest ? event.target.closest('[data-backup-id]') : event.target;
+		if (!button || !button.getAttribute('data-backup-id')) return;
+		var backupId = button.getAttribute('data-backup-id');
+		if (window.confirm('<%:Restore this manual checkpoint and its previous active SIM? Mobile connectivity will be interrupted.%>')) {
+			post(rollbackUrl, { backup_id: backupId, confirmation: 'ROLLBACK-' + backupId });
 		}
 	});
 
