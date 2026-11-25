@@ -1,0 +1,18 @@
+config profile 'sim1'
+	option name 'SIM 1'
+	option apn_auto '0'
+	option pdp_type 'IPV4V6'
+	option auth_enabled '0'
+	option auth_type '3'
+	option network_mode 'AUTO'
+	option band_auto '1'
+
+config profile 'sim2'
+	option name 'SIM 2'
+	option apn_auto '0'
+	option pdp_type 'IPV4V6'
+	option auth_enabled '0'
+	option auth_type '3'
+	option network_mode 'AUTO'
+	option band_auto '1'
+

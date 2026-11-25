@@ -1,0 +1,112 @@
+#!/bin/sh
+
+# Query-only RM500U status collector. No modem settings are changed.
+cache=/tmp/simmanager-status.json
+cache_new=/tmp/simmanager-status.json.new
+stamp=/tmp/simmanager-status.timestamp
+lock=/tmp/simmanager-status.lock
+ttl=8
+
+if [ -f "$cache" ] && [ -f "$stamp" ]; then
+	now=$(date +%s)
+	mtime=$(cat "$stamp" 2>/dev/null)
+	if [ -n "$mtime" ] && [ $((now - mtime)) -lt "$ttl" ]; then
+		cat "$cache"
+		exit 0
+	fi
+fi
+
+if ! mkdir "$lock" 2>/dev/null; then
+	[ -f "$cache" ] && cat "$cache" || printf '{}\n'
+	exit 0
+fi
+trap 'rmdir "$lock" 2>/dev/null' EXIT HUP INT TERM
+
+primary=$(uci -q get cellular.cellular.atdev)
+query_port=/dev/ttyUSB3
+[ -c "$query_port" ] || query_port="$primary"
+
+if [ ! -c "$query_port" ]; then
+	[ -f "$cache" ] && cat "$cache" || printf '{}\n'
+	exit 0
+fi
+
+# QENG is delayed by this modem firmware and is returned with the following
+# query. Keep all responses together before parsing them.
+raw=$(
+	at-cmd "$query_port" 'AT+QENG="servingcell"' 2>/dev/null
+	at-cmd "$query_port" 'AT+CGCONTRDP' 2>/dev/null
+	at-cmd "$query_port" 'AT+CNUM' 2>/dev/null
+	at-cmd "$query_port" 'AT+CEREG?' 2>/dev/null
+)
+raw=$(printf '%s\n' "$raw" | tr -d '\r')
+
+lte=$(printf '%s\n' "$raw" | grep '^+QENG: "LTE"' | tail -n 1)
+nr=$(printf '%s\n' "$raw" | grep '^+QENG: "NR5G-NSA"' | tail -n 1)
+context=$(printf '%s\n' "$raw" | grep '^+CGCONTRDP:' | head -n 1)
+cnum=$(printf '%s\n' "$raw" | grep '^+CNUM:' | head -n 1)
+cereg=$(printf '%s\n' "$raw" | grep '^+CEREG:' | tail -n 1)
+
+csv_field() {
+	printf '%s\n' "$1" | awk -F, -v field="$2" '{ value=$field; gsub(/^[[:space:]\"]+|[[:space:]\"]+$/, "", value); print value }'
+}
+
+cell_id=$(csv_field "$lte" 5)
+pci=$(csv_field "$lte" 6)
+earfcn=$(csv_field "$lte" 7)
+lte_band=$(csv_field "$lte" 8)
+rsrp=$(csv_field "$lte" 12)
+rsrq=$(csv_field "$lte" 13)
+rssi=$(csv_field "$lte" 14)
+sinr=$(csv_field "$lte" 15)
+nr_pci=$(csv_field "$nr" 4)
+nr_rsrp=$(csv_field "$nr" 5)
+nr_sinr=$(csv_field "$nr" 6)
+nr_rsrq=$(csv_field "$nr" 7)
+nr_arfcn=$(csv_field "$nr" 8)
+nr_band=$(csv_field "$nr" 9)
+apn=$(csv_field "$context" 3)
+phone_number=$(csv_field "$cnum" 2)
+registration=$(csv_field "$cereg" 2)
+
+signal_percent=''
+case "$rsrp" in
+	-*[0-9]|-*[0-9][0-9]|-*[0-9][0-9][0-9])
+		if [ "$rsrp" -ge -44 ]; then signal_percent=100
+		elif [ "$rsrp" -ge -85 ]; then signal_percent=$((80 + (rsrp + 85) * 20 / 41))
+		elif [ "$rsrp" -ge -95 ]; then signal_percent=$((60 + (rsrp + 95) * 20 / 10))
+		elif [ "$rsrp" -ge -105 ]; then signal_percent=$((40 + (rsrp + 105) * 20 / 10))
+		elif [ "$rsrp" -ge -115 ]; then signal_percent=$((20 + (rsrp + 115) * 20 / 10))
+		elif [ "$rsrp" -ge -140 ]; then signal_percent=$(((rsrp + 140) * 20 / 25))
+		else signal_percent=0
+		fi
+		;;
+esac
+
+. /usr/share/libubox/jshn.sh
+json_init
+json_add_string query_port "$query_port"
+json_add_string phone_number "$phone_number"
+json_add_string apn "$apn"
+json_add_string registration "$registration"
+json_add_string signal_percent "$signal_percent"
+json_add_string cell_id "$cell_id"
+json_add_string pci "$pci"
+json_add_string earfcn "$earfcn"
+json_add_string lte_band "$lte_band"
+json_add_string rsrp "$rsrp"
+json_add_string rsrq "$rsrq"
+json_add_string rssi "$rssi"
+json_add_string sinr "$sinr"
+json_add_string nr_pci "$nr_pci"
+json_add_string nr_rsrp "$nr_rsrp"
+json_add_string nr_rsrq "$nr_rsrq"
+json_add_string nr_sinr "$nr_sinr"
+json_add_string nr_arfcn "$nr_arfcn"
+json_add_string nr_band "$nr_band"
+if json_dump > "$cache_new"; then
+	mv -f "$cache_new" "$cache"
+	date +%s > "$stamp"
+fi
+json_cleanup
+cat "$cache"

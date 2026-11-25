@@ -1,0 +1,12 @@
+{
+	"luci-app-simmanager": {
+		"description": "Grant access to LuCI SIM Manager profiles",
+		"read": {
+			"uci": [ "simmanager", "cellular", "hw_info" ]
+		},
+		"write": {
+			"uci": [ "simmanager" ]
+		}
+	}
+}
+
