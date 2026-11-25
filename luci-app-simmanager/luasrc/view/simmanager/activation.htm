@@ -1,0 +1,176 @@
+<%+header%>
+
+<style>
+.simmanager-warning { padding: 14px 16px; margin-bottom: 16px; border-left: 4px solid #d92d20; background: #fff1f0; }
+.simmanager-safe { padding: 14px 16px; margin-bottom: 16px; border-left: 4px solid #21a366; background: #effaf3; }
+.simmanager-control-grid { display: grid; grid-template-columns: repeat(2, minmax(280px, 1fr)); gap: 14px; }
+.simmanager-control-card { border: 1px solid #d8dce2; border-radius: 6px; background: #fff; padding: 16px; }
+.simmanager-control-card.active { border: 2px solid #21a366; background: #f7fcf9; }
+.simmanager-control-card h3 { margin-top: 0; }
+.simmanager-card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.simmanager-active-badge { display: none; border-radius: 14px; padding: 4px 10px; background: #dff6e8; color: #08783e; font-weight: 600; white-space: nowrap; }
+.simmanager-control-card.active .simmanager-active-badge { display: inline-block; }
+.simmanager-control-card button { margin-top: 10px; }
+.simmanager-status { margin-top: 16px; border: 1px solid #d8dce2; border-radius: 6px; background: #fff; padding: 16px; }
+.simmanager-row { display: flex; justify-content: space-between; gap: 16px; padding: 6px 0; border-top: 1px solid #edf0f3; }
+.simmanager-row:first-of-type { border-top: 0; }
+.simmanager-muted { color: #667085; }
+.simmanager-error { color: #b42318; }
+@media (max-width: 800px) { .simmanager-control-grid { grid-template-columns: 1fr; } }
+</style>
+
+<h2><%:Activate SIM Profile & Roll Back%></h2>
+
+<div class="simmanager-warning">
+	<strong><%:Connectivity interruption warning%></strong><br>
+	<%:Activation writes the selected profile to the vendor cellular UCI configuration, switches the SIM when required, and reloads cellular service. Mobile connectivity will be interrupted temporarily.%>
+</div>
+
+<div class="simmanager-safe">
+	<strong><%:Recovery protection%></strong><br>
+	<%:Before every activation, the complete cellular configuration and previous active SIM are backed up under /etc/simmanager/backups. A failed activation automatically attempts to restore that backup. Vendor scripts, firmware, bootloader and flash partitions are never modified.%>
+</div>
+
+<div class="simmanager-control-grid">
+	<div id="activation-card-sim1" class="simmanager-control-card" data-slot="sim1">
+		<div class="simmanager-card-head"><h3><%:Activate SIM 1%></h3><span class="simmanager-active-badge"><%:Currently active%></span></div>
+		<p><%:Apply the saved SIM 1 APN profile and switch to SIM 1 if it is not already active.%></p>
+		<div id="profile-sim1" class="simmanager-muted"><%:Loading saved profile…%></div>
+		<button class="cbi-button cbi-button-apply" data-target="sim1" disabled><%:Review and activate SIM 1%></button>
+	</div>
+	<div id="activation-card-sim2" class="simmanager-control-card" data-slot="sim2">
+		<div class="simmanager-card-head"><h3><%:Activate SIM 2%></h3><span class="simmanager-active-badge"><%:Currently active%></span></div>
+		<p><%:Apply the saved SIM 2 APN profile and switch to SIM 2 if it is not already active.%></p>
+		<div id="profile-sim2" class="simmanager-muted"><%:Loading saved profile…%></div>
+		<button class="cbi-button cbi-button-apply" data-target="sim2" disabled><%:Review and activate SIM 2%></button>
+	</div>
+</div>
+
+<div class="simmanager-status">
+	<h3><%:Activation status%></h3>
+	<div class="simmanager-row"><span><%:Current active SIM%></span><strong id="control-active">—</strong></div>
+	<div class="simmanager-row"><span><%:State%></span><strong id="control-state">Idle</strong></div>
+	<div class="simmanager-row"><span><%:Message%></span><span id="control-message">No activation has been started.</span></div>
+	<div class="simmanager-row"><span><%:Last backup%></span><span id="control-backup">N/A</span></div>
+	<button id="control-rollback" class="cbi-button cbi-button-negative" disabled><%:Roll back to last backup%></button>
+	<p class="simmanager-muted"><%:Emergency LAN recovery command: /usr/sbin/simmanager-control rollback%></p>
+</div>
+
+<script type="text/javascript">
+//<![CDATA[
+(function() {
+	var token = '<%=token%>';
+	var profileUrl = '<%=luci.dispatcher.build_url("admin", "network", "simmanager", "status")%>';
+	var statusUrl = '<%=luci.dispatcher.build_url("admin", "network", "simmanager", "control_status")%>';
+	var activateUrl = '<%=luci.dispatcher.build_url("admin", "network", "simmanager", "activate")%>';
+	var rollbackUrl = '<%=luci.dispatcher.build_url("admin", "network", "simmanager", "rollback")%>';
+
+	var profilesLoaded = false;
+
+	function setBusy(busy) {
+		var buttons = document.querySelectorAll('[data-target]');
+		for (var i = 0; i < buttons.length; i++) buttons[i].disabled = busy || !profilesLoaded;
+	}
+
+	function addProfileRow(container, label, value) {
+		var row = document.createElement('div');
+		row.className = 'simmanager-row';
+		var left = document.createElement('span');
+		left.textContent = label;
+		var right = document.createElement('strong');
+		right.textContent = value || 'N/A';
+		row.appendChild(left);
+		row.appendChild(right);
+		container.appendChild(row);
+	}
+
+	function renderProfiles(data) {
+		var sims = (data && data.sims) || {};
+		['sim1', 'sim2'].forEach(function(key) {
+			var sim = sims[key] || {};
+			var container = document.getElementById('profile-' + key);
+			container.textContent = '';
+			container.className = '';
+			addProfileRow(container, '<%:Profile%>', sim.profile_name);
+			addProfileRow(container, '<%:APN mode%>', sim.apn_auto === '1' ? '<%:Automatic%>' : '<%:Manual%>');
+			addProfileRow(container, '<%:APN%>', sim.apn_auto === '1' ? '<%:Selected automatically by vendor service%>' : sim.profile_apn);
+			addProfileRow(container, '<%:PDP type%>', sim.pdp_type);
+			addProfileRow(container, '<%:Authentication%>', sim.auth_enabled === '1' ? ('<%:Enabled, type%> ' + (sim.auth_type || '3')) : '<%:Disabled%>');
+			addProfileRow(container, '<%:Network mode%>', sim.network_mode);
+			addProfileRow(container, '<%:Band selection%>', sim.band_auto === '1' ? '<%:Automatic%>' : '<%:Unsupported — activation will be blocked%>');
+		});
+		profilesLoaded = true;
+		setBusy(false);
+	}
+
+	function renderStatus(data) {
+		data = data || {};
+		document.getElementById('control-active').textContent = (data.active_sim || 'unknown').toUpperCase();
+		updateActiveCard(data.active_sim);
+		document.getElementById('control-state').textContent = data.state || 'idle';
+		document.getElementById('control-message').textContent = data.message || 'No activation has been started.';
+		document.getElementById('control-backup').textContent = data.backup || 'N/A';
+		var busy = ['validating', 'backing_up', 'applying', 'switching', 'waiting', 'rolling_back'].indexOf(data.state) >= 0;
+		setBusy(busy);
+		document.getElementById('control-rollback').disabled = busy || data.rollback_available !== '1';
+	}
+
+	function updateActiveCard(activeSim) {
+		['sim1', 'sim2'].forEach(function(slot) {
+			var card = document.getElementById('activation-card-' + slot);
+			var button = card.querySelector('[data-target]');
+			var active = slot === activeSim;
+			card.className = 'simmanager-control-card' + (active ? ' active' : '');
+			button.textContent = active ?
+				('<%:Reapply active%>' + ' ' + slot.toUpperCase() + ' ' + '<%:profile%>') :
+				('<%:Review and activate%>' + ' ' + slot.toUpperCase());
+		});
+	}
+
+	function post(url, values) {
+		values.token = token;
+		XHR.post(url, values, function(xhr, data) {
+			if (!data) {
+				try { data = JSON.parse(xhr.responseText); } catch (e) { data = {}; }
+			}
+			if (data.accepted === false) alert(data.error || '<%:Request was rejected.%>');
+		});
+	}
+
+	var buttons = document.querySelectorAll('[data-target]');
+	for (var i = 0; i < buttons.length; i++) {
+		buttons[i].addEventListener('click', function() {
+			var target = this.getAttribute('data-target');
+			var label = target.toUpperCase();
+			var warning = '<%:This will back up the current cellular configuration, apply the selected profile, and temporarily interrupt mobile connectivity.%>';
+			if (window.confirm(warning + '\n\n' + '<%:Continue with%>' + ' ' + label + '?')) {
+				post(activateUrl, { target: target, confirmation: 'SWITCH-' + label });
+			}
+		});
+	}
+
+	document.getElementById('control-rollback').addEventListener('click', function() {
+		if (window.confirm('<%:Restore the previous cellular configuration and active SIM from the last backup? Mobile connectivity will be interrupted.%>')) {
+			post(rollbackUrl, { confirmation: 'ROLLBACK' });
+		}
+	});
+
+	XHR.get(profileUrl, null, function(xhr, data) {
+		if (!data) {
+			try { data = JSON.parse(xhr.responseText); } catch (e) { data = {}; }
+		}
+		renderProfiles(data);
+	});
+
+	XHR.poll(3, statusUrl, null, function(xhr, data) {
+		if (!data) {
+			try { data = JSON.parse(xhr.responseText); } catch (e) { data = {}; }
+		}
+		renderStatus(data);
+	});
+})();
+//]]>
+</script>
+
+<%+footer%>
+

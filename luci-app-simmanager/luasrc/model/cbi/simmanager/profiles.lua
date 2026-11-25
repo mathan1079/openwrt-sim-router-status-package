@@ -1,5 +1,5 @@
 local map = Map("simmanager", translate("SIM Profiles"),
-	translate("Profiles are stored independently and are not applied to the modem in this read-only release. Saving this page does not switch SIMs, restart cellular service, or modify the vendor cellular configuration."))
+	translate("Profiles are stored independently. Saving this page does not switch SIMs, restart cellular service, or modify the vendor cellular configuration. Applying a profile is a separate, confirmed action on the Activate & Roll Back page."))
 
 local function add_profile(section_name, title)
 	local section = map:section(NamedSection, section_name, "profile", title)
@@ -15,8 +15,9 @@ local function add_profile(section_name, title)
 	local auto_apn = section:option(Flag, "apn_auto", translate("Automatic APN"))
 	auto_apn.default = auto_apn.disabled
 
-	local apn = section:option(Value, "apn", translate("APN"))
-	apn:depends("apn_auto", "0")
+	local apn = section:option(Value, "apn", translate("APN"),
+		translate("Enter the APN for this SIM. When Automatic APN is enabled, the vendor service may replace this value during activation."))
+	apn.placeholder = "example.apn"
 
 	local pdp = section:option(ListValue, "pdp_type", translate("PDP type"))
 	pdp:value("IP", "IPv4")
@@ -56,8 +57,22 @@ local function add_profile(section_name, title)
 	band_auto.default = band_auto.enabled
 
 	local bands = section:option(Value, "bands", translate("Preferred bands"),
-		translate("Profile metadata only in this release, for example: LTE B3,B40; NR n78."))
+		translate("Profile metadata only for now, for example: LTE B3,B40; NR n78. Activation is blocked unless automatic band selection is enabled."))
 	bands:depends("band_auto", "0")
+
+	local last_operator = section:option(DummyValue, "last_operator", translate("Last known operator"))
+	last_operator.default = translate("Not observed yet")
+	local last_iccid = section:option(DummyValue, "last_iccid", "ICCID")
+	last_iccid.default = translate("Not observed yet")
+	local last_apn = section:option(DummyValue, "last_apn", translate("Last known APN"))
+	last_apn.default = translate("Not observed yet")
+	local last_band = section:option(DummyValue, "last_band", translate("Last known serving bands"))
+	last_band.default = translate("Not observed yet")
+	local last_seen = section:option(DummyValue, "last_seen", translate("Last observed"))
+	function last_seen.cfgvalue(self, section_id)
+		local value = self.map:get(section_id, self.option)
+		return value and os.date("%Y-%m-%d %H:%M:%S", tonumber(value)) or translate("Not observed yet")
+	end
 end
 
 add_profile("sim1", translate("SIM 1"))

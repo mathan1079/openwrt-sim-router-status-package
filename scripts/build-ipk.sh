@@ -42,6 +42,7 @@ printf '2.0\n' > "$work_dir/debian-binary"
 find "$work_dir/data" -type d -exec chmod 755 {} \;
 find "$work_dir/data" -type f -exec chmod 644 {} \;
 chmod 755 "$work_dir/data/usr/sbin/simmanager-status"
+chmod 755 "$work_dir/data/usr/sbin/simmanager-control"
 
 (cd "$work_dir/control" && bsdtar --format=ustar --no-xattrs --uid 0 --gid 0 -czf "$work_dir/control.tar.gz" .)
 (cd "$work_dir/data" && bsdtar --format=ustar --no-xattrs --uid 0 --gid 0 -czf "$work_dir/data.tar.gz" .)

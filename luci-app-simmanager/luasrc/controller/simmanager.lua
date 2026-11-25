@@ -35,11 +35,97 @@ local function radio_value(value)
 	return value
 end
 
+local function signal_quality(rsrp)
+	local value = tonumber(rsrp)
+	if not value then return nil end
+	if value >= -80 then return "excellent" end
+	if value >= -90 then return "good" end
+	if value >= -100 then return "fair" end
+	if value >= -110 then return "poor" end
+	return "very_poor"
+end
+
+local function persist_last_known(uci, slot, payload, status_mtime)
+	if slot ~= "sim1" and slot ~= "sim2" then return false end
+	if payload.sim_status ~= "READY" or not first_value(payload, { "iccid" }) then return false end
+
+	local fs = require "nixio.fs"
+	local marker_path = "/tmp/simmanager-observer-slot"
+	local now = os.time()
+	local marker = trim(fs.readfile(marker_path) or "")
+	local marked_slot, marked_at = marker:match("^(sim[12])%s+(%d+)$")
+
+	if marked_slot ~= slot then
+		fs.writefile(marker_path, slot .. " " .. tostring(now) .. "\n")
+		return false
+	end
+
+	local marker_time = tonumber(marked_at) or now
+	local known_iccid = uci:get("simmanager", slot, "last_iccid")
+	local identity_confirmed = known_iccid and tostring(payload.iccid) == tostring(known_iccid)
+	if not identity_confirmed and (now - marker_time < 15 or (tonumber(status_mtime) or 0) <= marker_time) then
+		return false
+	end
+
+	local signature = table.concat({
+		tostring(payload.iccid or ""), tostring(payload.operator or ""),
+		tostring(payload.apn or ""), tostring(payload.network_mode or ""),
+		tostring(payload.current_band or "")
+	}, "|")
+	local changed = uci:get("simmanager", slot, "last_signature") ~= signature
+
+	if changed then
+		local values = {
+			last_signature = signature,
+			last_seen = tostring(now),
+			last_operator = payload.operator,
+			last_mccmnc = payload.mccmnc,
+			last_iccid = payload.iccid,
+			last_apn = payload.apn,
+			last_network_type = payload.network_mode,
+			last_signal_percent = payload.signal_percent,
+			last_rsrp = payload.rsrp,
+			last_band = payload.current_band,
+			last_cell_id = payload.cell_id,
+			last_pci = payload.pci
+		}
+		for key, value in pairs(values) do
+			if value ~= nil and tostring(value) ~= "" then
+				uci:set("simmanager", slot, key, tostring(value))
+			end
+		end
+	end
+
+	local profile_changed = false
+	if not first_value({ value = uci:get("simmanager", slot, "apn") }, { "value" }) and first_value(payload, { "apn" }) then
+		uci:set("simmanager", slot, "apn", tostring(payload.apn))
+		profile_changed = true
+	end
+	if not first_value({ value = uci:get("simmanager", slot, "phone_number") }, { "value" }) and first_value(payload, { "phone_number" }) then
+		uci:set("simmanager", slot, "phone_number", tostring(payload.phone_number))
+		profile_changed = true
+	end
+
+	if changed or profile_changed then uci:commit("simmanager") end
+	return true
+end
+
 function index()
 	entry({"admin", "network", "simmanager"}, alias("admin", "network", "simmanager", "dashboard"), _("SIM Manager"), 16)
 	entry({"admin", "network", "simmanager", "dashboard"}, template("simmanager/dashboard"), _("Dashboard"), 1)
 	entry({"admin", "network", "simmanager", "profiles"}, cbi("simmanager/profiles"), _("SIM Profiles"), 2)
+	entry({"admin", "network", "simmanager", "activation"}, template("simmanager/activation"), _("Activate / Roll Back"), 3)
 	entry({"admin", "network", "simmanager", "status"}, call("action_status")).leaf = true
+	entry({"admin", "network", "simmanager", "control_status"}, call("action_control_status")).leaf = true
+	entry({"admin", "network", "simmanager", "activate"}, post("action_activate")).leaf = true
+	entry({"admin", "network", "simmanager", "rollback"}, post("action_rollback")).leaf = true
+end
+
+local function write_json(payload)
+	local http = require "luci.http"
+	local jsonc = require "luci.jsonc"
+	http.prepare_content("application/json")
+	http.write(jsonc.stringify(payload))
 end
 
 function action_status()
@@ -56,6 +142,7 @@ function action_status()
 	local live_number = first_value(live, { "phone_number" }) or first_value(status, { "msisdn", "phone_number", "sim_number", "cnum" })
 	local stat = fs.stat("/tmp/4ginfo")
 	local rsrp = radio_value(live.rsrp) or radio_value(status.rsrp)
+	local vendor_rsrp = radio_value(status.rsrp)
 
 	local payload = {
 		available = next(status) ~= nil or next(live) ~= nil,
@@ -71,6 +158,11 @@ function action_status()
 		network_mode = status.nwmode,
 		registration = live.registration or status.cgreg,
 		signal_percent = rsrp and (live.signal_percent or status.signal) or nil,
+		signal_quality = signal_quality(rsrp),
+		signal_source = live.rsrp and "direct_modem_rsrp" or (vendor_rsrp and "vendor_rsrp" or "unavailable"),
+		vendor_signal_percent = status.signal,
+		vendor_rsrp = status.rsrp,
+		vendor_signal_valid = vendor_rsrp ~= nil,
 		rsrp = rsrp,
 		rsrq = radio_value(live.rsrq),
 		rssi = radio_value(live.rssi),
@@ -93,6 +185,10 @@ function action_status()
 		imei = status.imei,
 		scan_mode = status.scanmode,
 		query_port = live.query_port,
+		supported_wcdma_bands = status.gwbandval,
+		supported_lte_bands = status.ltebandval,
+		supported_nsa_5g_bands = status.nsanr5gbandval,
+		supported_sa_5g_bands = status.nr5gbandval,
 		supported_bands = {
 			wcdma = status.gwbandval,
 			lte = status.ltebandval,
@@ -101,8 +197,21 @@ function action_status()
 		}
 	}
 
+	local status_stable = persist_last_known(uci, active_sim, payload, stat and stat.mtime or nil)
+	payload.status_stable = status_stable
+	if not status_stable then
+		for _, key in ipairs({
+			"operator", "mccmnc", "registration", "signal_percent", "signal_quality",
+			"signal_source", "rsrp", "rsrq", "rssi", "sinr", "nr_rsrp", "nr_rsrq",
+			"nr_sinr", "current_band", "cell_id", "pci", "frequency", "nr_pci",
+			"nr_frequency", "lte_band", "nr_band", "apn", "sim_status", "iccid"
+		}) do payload[key] = nil end
+	end
+
 	local function sim_details(slot)
 		local is_active = active_sim == slot
+		local last_iccid = uci:get("simmanager", slot, "last_iccid")
+		local has_last_known = last_iccid ~= nil and last_iccid ~= ""
 		local details = {
 			slot = slot,
 			title = uci:get("hw_info", "cellular", slot == "sim2" and "s2_title" or "s_title") or string.upper(slot),
@@ -110,11 +219,16 @@ function action_status()
 			profile_name = uci:get("simmanager", slot, "name"),
 			phone_number = uci:get("simmanager", slot, "phone_number"),
 			profile_apn = uci:get("simmanager", slot, "apn"),
-			apn_auto = uci:get("simmanager", slot, "apn_auto"),
-			pdp_type = uci:get("simmanager", slot, "pdp_type"),
-			network_mode = uci:get("simmanager", slot, "network_mode"),
-			band_auto = uci:get("simmanager", slot, "band_auto"),
-			bands = uci:get("simmanager", slot, "bands")
+			apn_auto = uci:get("simmanager", slot, "apn_auto") or "0",
+			pdp_type = uci:get("simmanager", slot, "pdp_type") or "IPV4V6",
+			auth_enabled = uci:get("simmanager", slot, "auth_enabled") or "0",
+			auth_type = uci:get("simmanager", slot, "auth_type") or "3",
+			network_mode = uci:get("simmanager", slot, "network_mode") or "AUTO",
+			band_auto = uci:get("simmanager", slot, "band_auto") or "1",
+			bands = uci:get("simmanager", slot, "bands"),
+			last_known = has_last_known,
+			last_seen = uci:get("simmanager", slot, "last_seen"),
+			transitioning = is_active and not status_stable
 		}
 
 		if is_active then
@@ -131,6 +245,18 @@ function action_status()
 			details.current_band = payload.current_band
 			details.cell_id = payload.cell_id
 			details.pci = payload.pci
+		elseif has_last_known then
+			details.operator = uci:get("simmanager", slot, "last_operator")
+			details.mccmnc = uci:get("simmanager", slot, "last_mccmnc")
+			details.sim_status = "READY"
+			details.current_apn = uci:get("simmanager", slot, "last_apn")
+			details.iccid = last_iccid
+			details.network_type = uci:get("simmanager", slot, "last_network_type")
+			details.signal_percent = uci:get("simmanager", slot, "last_signal_percent")
+			details.rsrp = uci:get("simmanager", slot, "last_rsrp")
+			details.current_band = uci:get("simmanager", slot, "last_band")
+			details.cell_id = uci:get("simmanager", slot, "last_cell_id")
+			details.pci = uci:get("simmanager", slot, "last_pci")
 		end
 
 		return details
@@ -141,7 +267,45 @@ function action_status()
 		sim2 = sim_details("sim2")
 	}
 
-	http.prepare_content("application/json")
-	http.write(jsonc.stringify(payload))
+	write_json(payload)
+end
+
+function action_control_status()
+	local jsonc = require "luci.jsonc"
+	local sys = require "luci.sys"
+	local uci = require "luci.model.uci".cursor()
+	local payload = jsonc.parse(sys.exec("/usr/sbin/simmanager-control status 2>/dev/null")) or {}
+	payload.active_sim = uci:get("cellular", "cellular", "hw_sim") or "unknown"
+	write_json(payload)
+end
+
+function action_activate()
+	local http = require "luci.http"
+	local sys = require "luci.sys"
+	local target = http.formvalue("target")
+	local confirmation = http.formvalue("confirmation")
+
+	if (target ~= "sim1" and target ~= "sim2") or confirmation ~= ("SWITCH-" .. string.upper(target or "")) then
+		http.status(400, "Bad Request")
+		write_json({ accepted = false, error = "Invalid target or confirmation" })
+		return
+	end
+
+	local rc = sys.call("/usr/sbin/simmanager-control activate " .. target .. " >/dev/null 2>&1 &")
+	write_json({ accepted = rc == 0, target = target })
+end
+
+function action_rollback()
+	local http = require "luci.http"
+	local sys = require "luci.sys"
+
+	if http.formvalue("confirmation") ~= "ROLLBACK" then
+		http.status(400, "Bad Request")
+		write_json({ accepted = false, error = "Invalid rollback confirmation" })
+		return
+	end
+
+	local rc = sys.call("/usr/sbin/simmanager-control rollback >/dev/null 2>&1 &")
+	write_json({ accepted = rc == 0 })
 end
 
