@@ -1,0 +1,70 @@
+#!/bin/sh
+detector_lock='/tmp/cellular_detect.lock'
+if ! mkdir "${detector_lock}" 2>/dev/null; then
+	old_pid=`cat "${detector_lock}/pid" 2>/dev/null`
+	if [ -n "${old_pid}" ] && kill -0 "${old_pid}" 2>/dev/null; then
+		logger -t simmanager-cellular-guard "Skipped duplicate cellular detector start; PID ${old_pid} is already running."
+		exit 0
+	fi
+	rm -rf "${detector_lock}"
+	mkdir "${detector_lock}" 2>/dev/null || exit 1
+fi
+echo "$$" > "${detector_lock}/pid"
+release_detector_lock() {
+	lock_pid=`cat "${detector_lock}/pid" 2>/dev/null`
+	[ "${lock_pid}" = "$$" ] && rm -rf "${detector_lock}"
+}
+trap release_detector_lock EXIT HUP INT TERM
+
+. /lib/functions/cellular.sh
+
+export dir='/usr/sbin/cellular'
+export cell_num=`uci show hw_info 2> /dev/null | grep '=hw_info' | grep "cellular" | wc -l`
+
+count='1'
+option='1'
+cell_count='1'
+rm -rf /tmp/cellular_detect_*.log
+
+while true
+do
+	option="${count}"
+	usb_hub=''
+	[ "${option}" == "1" ] && option='' 	
+	usb2_hub=`uci get hw_info.cellular${option}.usb2_hub 2> /dev/null`
+	usb3_hub=`uci get hw_info.cellular${option}.usb3_hub 2> /dev/null`
+	[ -n "${usb2_hub}" ] && [ -e "/sys/bus/usb/devices/${usb2_hub}" ] && usb_hub="${usb2_hub}"
+	[ -n "${usb3_hub}" ] && [ -e "/sys/bus/usb/devices/${usb3_hub}" ] && usb_hub="${usb3_hub}"
+	
+	if [ -n "${usb_hub}" ] && [ -e "/sys/bus/usb/devices/${usb_hub}" ] ;then
+	
+		vid=`cat /sys/bus/usb/devices/${usb_hub}/idVendor 2> /dev/null`
+		pid=`cat /sys/bus/usb/devices/${usb_hub}/idProduct 2> /dev/null`
+		vidpid_exist=`vidpid_check "${vid}:${pid}"`
+		if [ ! -f "/tmp/cellular_detect_${count}.log" ] && [ "${vidpid_exist}" != '0' ] ;then
+			/usr/sbin/cellular/cellular_Prepare "${count}" "${usb_hub}" "${vid}:${pid}" &
+			echo "${cell_count}_${option}_${count}_${usb_hub}_${vid}:${pid}" > /tmp/cellular_detect_${count}.log
+			cell_count=`expr ${cell_count} + 1`
+			[ "${cell_count}" -gt "${cell_num}" ] && break
+		fi
+	fi
+	count=`expr ${count} + 1`
+	[ "${count}" -gt "${cell_num}" ] && count='1'
+
+	sleep 3
+done
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
