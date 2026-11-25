@@ -111,13 +111,32 @@ local function persist_last_known(uci, slot, payload, status_mtime)
 end
 
 function index()
-	entry({"admin", "network", "simmanager"}, alias("admin", "network", "simmanager", "dashboard"), _("SIM Manager"), 16)
-	entry({"admin", "network", "simmanager", "dashboard"}, template("simmanager/dashboard"), _("Dashboard"), 1)
-	entry({"admin", "network", "simmanager", "profiles"}, cbi("simmanager/profiles"), _("SIM Profiles"), 2)
-	entry({"admin", "network", "simmanager", "activation"}, template("simmanager/activation"), _("Activate / Roll Back"), 3)
-	entry({"admin", "network", "simmanager", "automation"}, cbi("simmanager/automation"), _("Automatic Switching"), 4)
-	entry({"admin", "network", "sim1sms"}, template("simmanager/sms"), _("SIM 1 SMS"), 17)
-	entry({"admin", "network", "sim2sms"}, template("simmanager/sms"), _("SIM 2 SMS"), 18)
+	entry({"admin", "simmanager"}, firstchild(), _("SIM Management"), 45)
+	entry({"admin", "simmanager", "dashboard"}, template("simmanager/dashboard"), _("Dashboard"), 1)
+	entry({"admin", "simmanager", "profiles"}, cbi("simmanager/profiles"), _("SIM Profiles"), 2)
+	entry({"admin", "simmanager", "activation"}, template("simmanager/activation"), _("Activate / Roll Back"), 3)
+	entry({"admin", "simmanager", "automation"}, cbi("simmanager/automation"), _("Automatic Switching"), 4)
+	entry({"admin", "simmanager", "sim1sms"}, template("simmanager/sms"), _("SIM 1 SMS"), 5)
+	entry({"admin", "simmanager", "sim2sms"}, template("simmanager/sms"), _("SIM 2 SMS"), 6)
+	entry({"admin", "simmanager", "status"}, call("action_status")).leaf = true
+	entry({"admin", "simmanager", "control_status"}, call("action_control_status")).leaf = true
+	entry({"admin", "simmanager", "activate"}, post("action_activate")).leaf = true
+	entry({"admin", "simmanager", "rollback"}, post("action_rollback")).leaf = true
+	entry({"admin", "simmanager", "sms_summary"}, call("action_sms_summary")).leaf = true
+	entry({"admin", "simmanager", "sms_list"}, call("action_sms_list")).leaf = true
+	entry({"admin", "simmanager", "sms_sync"}, post("action_sms_sync")).leaf = true
+	entry({"admin", "simmanager", "sms_send"}, post("action_sms_send")).leaf = true
+	entry({"admin", "simmanager", "sms_mark"}, post("action_sms_mark")).leaf = true
+	entry({"admin", "simmanager", "sms_delete"}, post("action_sms_delete")).leaf = true
+
+	-- Hidden compatibility routes for bookmarks, cached pages and older overview widgets.
+	entry({"admin", "network", "simmanager"}, alias("admin", "simmanager", "dashboard"), nil)
+	entry({"admin", "network", "simmanager", "dashboard"}, alias("admin", "simmanager", "dashboard"), nil)
+	entry({"admin", "network", "simmanager", "profiles"}, alias("admin", "simmanager", "profiles"), nil)
+	entry({"admin", "network", "simmanager", "activation"}, alias("admin", "simmanager", "activation"), nil)
+	entry({"admin", "network", "simmanager", "automation"}, alias("admin", "simmanager", "automation"), nil)
+	entry({"admin", "network", "sim1sms"}, alias("admin", "simmanager", "sim1sms"), nil)
+	entry({"admin", "network", "sim2sms"}, alias("admin", "simmanager", "sim2sms"), nil)
 	entry({"admin", "network", "simmanager", "status"}, call("action_status")).leaf = true
 	entry({"admin", "network", "simmanager", "control_status"}, call("action_control_status")).leaf = true
 	entry({"admin", "network", "simmanager", "activate"}, post("action_activate")).leaf = true

@@ -103,7 +103,7 @@ return baseclass.extend({
 	title: _('SIM Manager'),
 
 	load: function() {
-		return request.get(L.url('admin/network/simmanager/status')).then(function(response) {
+		return request.get(L.url('admin/simmanager/status')).then(function(response) {
 			return response.json();
 		});
 	},

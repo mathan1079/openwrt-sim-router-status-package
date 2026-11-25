@@ -103,7 +103,7 @@
 //<![CDATA[
 (function() {
 	var token = '<%=token%>';
-	var profileUrl = '<%=luci.dispatcher.build_url("admin", "network", "simmanager", "status")%>';
+	var profileUrl = '<%=luci.dispatcher.build_url("admin", "simmanager", "status")%>';
 
 	function formatLocalTime(epoch) {
 		var date = new Date(Number(epoch) * 1000);
@@ -119,9 +119,9 @@
 			' ' + pad(hours % 12 || 12) + ':' + pad(date.getMinutes()) + ':' + pad(date.getSeconds()) +
 			' ' + (hours >= 12 ? 'PM' : 'AM') + (zone ? ' ' + zone : '');
 	}
-	var statusUrl = '<%=luci.dispatcher.build_url("admin", "network", "simmanager", "control_status")%>';
-	var activateUrl = '<%=luci.dispatcher.build_url("admin", "network", "simmanager", "activate")%>';
-	var rollbackUrl = '<%=luci.dispatcher.build_url("admin", "network", "simmanager", "rollback")%>';
+	var statusUrl = '<%=luci.dispatcher.build_url("admin", "simmanager", "control_status")%>';
+	var activateUrl = '<%=luci.dispatcher.build_url("admin", "simmanager", "activate")%>';
+	var rollbackUrl = '<%=luci.dispatcher.build_url("admin", "simmanager", "rollback")%>';
 
 	var profilesLoaded = false;
 	var automationEnabled = false;

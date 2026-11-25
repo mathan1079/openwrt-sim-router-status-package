@@ -100,11 +100,11 @@
 	var token = '<%=token%>';
 	var initialSlot = '<%=initial_slot%>';
 	var urls = {
-		summary: '<%=luci.dispatcher.build_url("admin", "network", "simmanager", "sms_summary")%>',
-		list: '<%=luci.dispatcher.build_url("admin", "network", "simmanager", "sms_list")%>',
-		send: '<%=luci.dispatcher.build_url("admin", "network", "simmanager", "sms_send")%>',
-		mark: '<%=luci.dispatcher.build_url("admin", "network", "simmanager", "sms_mark")%>',
-		remove: '<%=luci.dispatcher.build_url("admin", "network", "simmanager", "sms_delete")%>'
+		summary: '<%=luci.dispatcher.build_url("admin", "simmanager", "sms_summary")%>',
+		list: '<%=luci.dispatcher.build_url("admin", "simmanager", "sms_list")%>',
+		send: '<%=luci.dispatcher.build_url("admin", "simmanager", "sms_send")%>',
+		mark: '<%=luci.dispatcher.build_url("admin", "simmanager", "sms_mark")%>',
+		remove: '<%=luci.dispatcher.build_url("admin", "simmanager", "sms_delete")%>'
 	};
 	var currentSlot = initialSlot;
 	var activeSim = 'unknown';
