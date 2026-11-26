@@ -26,7 +26,7 @@ def main():
     env = dict(os.environ, FORMAT='apk' if manager == 'apk' else 'ipk')
     subprocess.run([str(ROOT / 'scripts/build.sh')], cwd=ROOT, env=env, check=True)
     version = os.environ.get('VERSION', '1.0.0')
-    release = os.environ.get('RELEASE', '4')
+    release = os.environ.get('RELEASE', '5')
     name = (f'{PACKAGE}-{version}-r{release}.apk' if manager == 'apk'
         else f'{PACKAGE}_{version}-{release}_all.ipk')
     remote = '/tmp/' + name

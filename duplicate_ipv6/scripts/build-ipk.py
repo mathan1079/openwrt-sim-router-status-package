@@ -9,7 +9,7 @@ import tarfile
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = 'luci-app-ipv6-cleaner'
 version = os.environ.get('VERSION', '1.0.0')
-release = os.environ.get('RELEASE', '4')
+release = os.environ.get('RELEASE', '5')
 for value in (version, release):
     if not re.fullmatch(r'[0-9][A-Za-z0-9.+~]*', value):
         raise SystemExit('VERSION and RELEASE must start with a digit and contain only letters, digits, . + ~')

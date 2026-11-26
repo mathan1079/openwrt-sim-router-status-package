@@ -1,6 +1,6 @@
 # luci-app-ipv6-cleaner
 
-Architecture-independent OpenWrt package with a **Services → IPv6 Cleaner** LuCI page.
+Architecture-independent OpenWrt package with a **Network → IPv6 Cleaner** LuCI page.
 Uses modern JavaScript LuCI with a legacy Lua/CBI fallback for vendor firmware without view.js, plus rpcd, procd, UCI, POSIX shell and iproute2; no compiled application code. Intended for OpenWrt 23.05/24.10 and newer modern LuCI installations; these release targets require SDK/device validation. No existing project files were read or changed: the requested `duplicate_ipv6` folder was initially absent, so no project-specific release convention could be established.
 
 ## Behavior
@@ -27,7 +27,7 @@ make clean
 
 Default router: `mathancbe-er605-local`, set near the top of the Makefile. To target another router: `make install ROUTER=your-router`. No FORMAT argument is needed. Installation builds the detected format automatically; plain builds never contact the router.
 
-Current outputs: `dist/luci-app-ipv6-cleaner_1.0.0-4_all.ipk` and `dist/luci-app-ipv6-cleaner-1.0.0-r4.apk`. This release increments the package revision so installed copies receive the updated UI.
+Current outputs: `dist/luci-app-ipv6-cleaner_1.0.0-5_all.ipk` and `dist/luci-app-ipv6-cleaner-1.0.0-r5.apk`. This release increments the package revision so installed copies receive the updated UI.
 
 Build requirements: make, Python 3, native apk-tools 3 with `mkpkg`, and fakeroot for non-root builds. Both formats build locally without Docker. APK metadata uses `noarch`; IPK uses `all`. If apk is outside PATH, APK_TOOL can point to its executable. The default scp flags are `-O`.
 

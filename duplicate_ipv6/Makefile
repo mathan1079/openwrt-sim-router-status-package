@@ -4,7 +4,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-ipv6-cleaner
 PKG_VERSION:=1.0.0
-PKG_RELEASE:=4
+PKG_RELEASE:=5
 PKG_LICENSE:=MIT
 
 LUCI_TITLE:=Automatic deprecated public IPv6 cleaner
@@ -18,8 +18,8 @@ include $(TOPDIR)/feeds/luci/luci.mk
 else
 PACKAGE := luci-app-ipv6-cleaner
 VERSION ?= 1.0.0
-RELEASE ?= 4
-ROUTER ?= mathansims-local
+RELEASE ?= 5
+ROUTER ?= mathankpty-er605-local
 SCP_FLAGS ?= -O
 FORMAT ?= both
 APK_TOOL ?= apk

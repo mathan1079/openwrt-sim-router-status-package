@@ -1,6 +1,6 @@
 # First-router tweak status
 
-Last audited: 26 November 2026, 07:34 IST.
+Last audited: 26 November 2026, 11:16 IST.
 
 This is the ownership map for router-level changes. The exact current files are
 under `current_first_router/files/`.
@@ -13,6 +13,7 @@ under `current_first_router/files/`.
 | `jio_ipv6_xlat_fix` | Active/incorporated | Helper matches live router; worker integration is in the cumulative worker. |
 | `cellular_worker_single_instance_fix` | Active/incorporated | Signal and PID-lock behavior is in the cumulative worker. |
 | `modem_command_collision_restart_fix` | Active/latest delta | Complete before/after worker files and a real unified patch are archived here. |
+| `opkg_feed_cleanup` | Active | Removes duplicate, obsolete snapshot and missing MediaTek feeds without changing installed packages. |
 | `celluar_crash_fix` | Active/incorporated | Atomic JSON behavior remains in the cumulative worker. Its old standalone changed worker is historical and must not be deployed over the current worker. |
 | `sim_switch_timing_fix` | Reverted/inactive | Neither archived changed file matches the router. Do not deploy without a fresh review and merge. |
 

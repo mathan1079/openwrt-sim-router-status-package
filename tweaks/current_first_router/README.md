@@ -1,7 +1,7 @@
 # Current first-router snapshot
 
 This directory is the authoritative local snapshot of router-owned files that
-were verified against the first router on 26 November 2026 at 07:34 IST.
+were extended with the verified OPKG feed file on 26 November 2026 at 11:16 IST.
 
 Files below `files/` preserve their absolute router paths. This snapshot is for
 comparison, recovery planning and future patch preparation. Do not deploy the

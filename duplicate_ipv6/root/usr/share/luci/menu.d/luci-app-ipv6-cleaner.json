@@ -1,5 +1,5 @@
 {
-  "admin/services/ipv6-cleaner": {
+  "admin/network/ipv6-cleaner": {
     "title": "IPv6 Cleaner",
     "order": 65,
     "action": {
