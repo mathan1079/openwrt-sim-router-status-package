@@ -1,0 +1,89 @@
+#!/bin/sh /etc/rc.common
+
+. /lib/functions/cellular.sh
+. /lib/functions/esim.sh
+
+START=00
+EXTRA_COMMANDS="network_init"
+EXTRA_COMMANDS="hardware_init"
+EXTRA_COMMANDS="cellular_init"
+
+cell_num=`uci show hw_info 2> /dev/null | grep '=hw_info' | grep "cellular" | wc -l`
+
+network_init() {
+
+	cellular_traversal "${cell_num}" _network_setting "init"
+}
+
+cellular_init() {
+
+	cellular_traversal "${cell_num}" _cellular_setting "init"
+}
+
+hardware_init() {
+
+	cellular_traversal "${cell_num}" _hardware_setting "init"
+}
+
+network_reload() {
+
+	cellular_traversal "${cell_num}" _network_setting "reload"
+}
+
+cellular_reload() {
+
+	cellular_traversal "${cell_num}" _cellular_setting "reload"
+}
+
+hardware_reload() {
+
+	cellular_traversal "${cell_num}" _hardware_setting "reload"
+}
+
+sim_switch_pending() {
+	index=1
+	while [ "$index" -le "$cell_num" ]; do
+		[ "$index" = 1 ] && section="cellular" || section="cellular${index}"
+		desired=$(uci -q get "cellular.${section}.hw_sim")
+		case "$desired" in
+			sim1) sim_suffix="" ;;
+			sim[2-9]) sim_suffix=${desired#sim} ;;
+			*) index=$((index + 1)); continue ;;
+		esac
+		sim_fs=$(uci -q get "hw_info.${section}.s${sim_suffix}_fs")
+		sim_file=$(uci -q get "hw_info.${section}.s${sim_suffix}_file")
+		expected=$(uci -q get "hw_info.${section}.s${sim_suffix}_val")
+		[ -n "$sim_fs" ] && [ -n "$sim_file" ] && [ -n "$expected" ] || {
+			index=$((index + 1))
+			continue
+		}
+		current=$(cat "/sys/class/${sim_fs}/${sim_file}" 2>/dev/null)
+		[ -n "$current" ] && [ "$current" != "$expected" ] && return 0
+		index=$((index + 1))
+	done
+	return 1
+}
+
+start() {
+
+	network_init  
+	hardware_init
+	cellular_init 
+	watchsystem
+}
+
+reload() {
+	if sim_switch_pending; then
+		logger -t simmanager-switch-timing "Physical SIM change detected; using one hardware cycle and skipping the redundant full cellular reload."
+		network_reload
+		hardware_reload
+		watchsystem
+		return
+	fi
+
+	network_reload
+	cellular_reload
+	hardware_reload
+	watchsystem
+}
+

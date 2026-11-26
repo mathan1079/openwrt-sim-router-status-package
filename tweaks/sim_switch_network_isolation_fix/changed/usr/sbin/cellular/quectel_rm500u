@@ -15,10 +15,51 @@ release_instance_lock() {
 	lock_pid=`cat "${instance_lock}/pid" 2>/dev/null`
 	[ "${lock_pid}" = "$$" ] && rm -rf "${instance_lock}"
 }
-trap release_instance_lock EXIT HUP INT TERM
+stop_worker() {
+	release_instance_lock
+	exit 0
+}
+trap release_instance_lock EXIT
+trap stop_worker HUP INT TERM
 
 . /lib/functions/cellular.sh
 . /lib/functions/esim.sh
+
+# The vendor dial helper treats one missing ping result as a reason to run
+# AT+CFUN=1 and ifup.  On this firmware, several processes share the AT port,
+# so a transient or crossed reply must never be allowed to bounce the link.
+quectel_asr_ecm_dial_safe() {
+	local atdev="$1"
+	local ifname="$2"
+	local network_section="$4"
+	local count="$5"
+	local check_ip net_stat qnetdev_ret check_dial
+
+	check_ip=`ifconfig "${ifname}" 2>/dev/null | grep "inet addr:" | awk -F 'Bcast:' '{print $1}' | cut -d ":" -f2 | sed 's/\ //g'`
+	net_stat=`grep -c "64 bytes" "/tmp/ping_cellular${count}" 2>/dev/null`
+	qnetdev_ret=`at-cmd "${atdev}" AT+QNETDEVCTL? 2>/dev/null | tr -d '\r'`
+	check_dial=`echo "${qnetdev_ret}" | grep '^+QNETDEVCTL: 1,' | sed -n '1p' | cut -d ':' -f2 | sed 's/ //g'`
+
+	if [ -z "${check_ip}" ]; then
+		logger -t simmanager-cellular-guard "${network_section} has no IPv4 address; requesting cellular-only DHCP recovery."
+		ifconfig "${ifname}" up
+		ifup "${network_section}"
+	elif [ "${net_stat:-0}" -le 0 ]; then
+		logger -t simmanager-cellular-guard "Ignored one empty/failed ping sample while ${network_section} still has ${check_ip}."
+	fi
+
+	case "${check_dial}" in
+		1,3,1)
+			;;
+		1,3,0)
+			logger -t simmanager-cellular-guard "RM500U data call is stopped; starting it without resetting the modem."
+			at-cmd "${atdev}" AT+QNETDEVCTL=1,3,1 >/dev/null 2>&1
+			;;
+		*)
+			logger -t simmanager-cellular-guard "Ignored invalid/crossed QNETDEVCTL reply; no interface or modem reset was performed."
+			;;
+	esac
+}
 
 ## NCM
 ## 支持模组：RM500U、RM500U-CNV、RG500U
@@ -40,7 +81,7 @@ dir='/usr/sbin/cellular'
 _pcie_mode='1'
 _eth_mode="${phy}"
 _usbnet='5'
-dial_Program='quectel_asr_ecm_dial'
+dial_Program='quectel_asr_ecm_dial_safe'
 
 ## 打开回显功能
 ## at-cmd "${atdev}" ATE1
@@ -104,28 +145,31 @@ do
 
     ### 打开PCIE
     pcie_mode_ret=`at-cmd "${atdev}" AT+QCFG=\"pcie/mode\" 2> /dev/null`
-    pcie_mode_result=`echo "${pcie_mode_ret}" | grep "OK" | wc -l`
-    pcie_mode=`echo "${pcie_mode_ret}" | grep "+QCFG:" | cut -d "," -f2 | tr -d '\r'`
+    pcie_mode_result=`echo "${pcie_mode_ret}" | tr -d '\r' | grep '^+QCFG: "pcie/mode",' | wc -l`
+    pcie_mode=`echo "${pcie_mode_ret}" | tr -d '\r' | grep '^+QCFG: "pcie/mode",' | sed -n '1p' | cut -d "," -f2`
     if [ "${pcie_mode_result}" == "1" ] && [ "${pcie_mode}" != "${_pcie_mode}" ];then
         at-cmd "${atdev}" AT+QCFG=\"pcie/mode\",${_pcie_mode}
+		logger -t simmanager-cellular-guard "Validated pcie/mode mismatch (${pcie_mode} -> ${_pcie_mode}); scheduling one modem restart."
         cfun_flags='1'
     fi
 
     ### 打开ETH功能
     eth_mode_ret=`at-cmd "${atdev}" AT+QCFG=\"ethernet\" 2> /dev/null`
-    eth_mode_result=`echo "${eth_mode_ret}" | grep "OK" | wc -l`
-    eth_mode=`echo "${eth_mode_ret}" | grep "+QCFG:" | cut -d "," -f2 | tr -d '\r'`
+    eth_mode_result=`echo "${eth_mode_ret}" | tr -d '\r' | grep '^+QCFG: "ethernet",' | wc -l`
+    eth_mode=`echo "${eth_mode_ret}" | tr -d '\r' | grep '^+QCFG: "ethernet",' | sed -n '1p' | cut -d "," -f2`
     if [ "${eth_mode_result}" == "1" ] && [ "${eth_mode}" != "${_eth_mode}" ];then
         at-cmd "${atdev}" AT+QCFG=\"ethernet\",${_eth_mode}
+		logger -t simmanager-cellular-guard "Validated ethernet mismatch (${eth_mode} -> ${_eth_mode}); scheduling one modem restart."
         cfun_flags='1'
     fi
 
     ### 拨号设置
     usbnet_ret=`at-cmd "${atdev}" AT+QCFG=\"usbnet\" 2> /dev/null`
-    usbnet_result=`echo "${usbnet_ret}" | grep "OK" | wc -l`
-    usbnet=`echo "${usbnet_ret}" | grep "+QCFG:" | cut -d "," -f2 | tr -d '\r'`
+    usbnet_result=`echo "${usbnet_ret}" | tr -d '\r' | grep '^+QCFG: "usbnet",' | wc -l`
+    usbnet=`echo "${usbnet_ret}" | tr -d '\r' | grep '^+QCFG: "usbnet",' | sed -n '1p' | cut -d "," -f2`
     if [ "${usbnet_result}" == "1" ] && [ "${usbnet}" != "${_usbnet}" ];then
         at-cmd "${atdev}" AT+QCFG=\"usbnet\",${_usbnet}
+		logger -t simmanager-cellular-guard "Validated usbnet mismatch (${usbnet} -> ${_usbnet}); scheduling one modem restart."
         cfun_flags='1'
     fi
 
@@ -138,6 +182,7 @@ do
 	### 重启模组
 	if [ "${cfun_flags}" == '1' ];then              
 		cfun_flags='0'
+		logger -t simmanager-cellular-guard "Restarting RM500U after a validated persistent transport configuration change."
 		at-cmd "${atdev}" AT+CFUN=1,1    
  		sleep 10  
 		continue     
@@ -148,11 +193,20 @@ do
     iccid=$(at-cmd "${atdev}" AT+CCID | grep "+CCID:" | cut -d ":" -f2 | sed 's/\ //g' | tr -d '\r')
     iccid_len=$(echo "${iccid}" | wc -L)
     if [ "${iccid_len}" != "20" ] && [ "${iccid_len}" != "19" ] ;then
+        rm -f "/tmp/simmanager-xlat-${cell_section}.state"
         iccid="NO SIM"
         cpin="None"
         isp="None"
         signal="0"
     else
+		### Jio / IPv6-only preparation
+		/usr/sbin/simmanager-jio-ensure "${atdev}" "${cell_section}" "${iccid}"
+		jio_prepare_status=$?
+		if [ "${jio_prepare_status}" = "10" ]; then
+			sleep 12
+			continue
+		fi
+
 		### 拨号
 		m_pdp=`uci get cellular.${cell_section}.m_pdp 2> /dev/null`
 		pdp_type="${m_pdp}"

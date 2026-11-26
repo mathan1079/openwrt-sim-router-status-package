@@ -1,0 +1,35 @@
+--- /usr/sbin/cellular/quectel_rm500u.before
++++ /usr/sbin/cellular/quectel_rm500u.after
+@@
+     if [ "${iccid_len}" != "20" ] && [ "${iccid_len}" != "19" ] ;then
++        rm -f "/tmp/simmanager-xlat-${cell_section}.state"
+@@
+     else
++        ### Jio / IPv6-only preparation
++        /usr/sbin/simmanager-jio-ensure "${atdev}" "${cell_section}" "${iccid}"
++        jio_prepare_status=$?
++        if [ "${jio_prepare_status}" = "10" ]; then
++            sleep 12
++            continue
++        fi
++
+         ### Dial
+--- /usr/sbin/simmanager-control.before
++++ /usr/sbin/simmanager-control.after
+@@
+         registration=$(locked_at "$query_port" 'AT+CEREG?' 2>/dev/null | tr -d '\r' | grep '+CEREG:' | tail -n 1)
++        registration_5g=$(locked_at "$query_port" 'AT+C5GREG?' 2>/dev/null | tr -d '\r' | grep '+C5GREG:' | tail -n 1)
+         case "$registration" in *,1|*,1,*|*,5|*,5,*) return 0 ;; esac
++        case "$registration_5g" in *,1|*,1,*|*,5|*,5,*) return 0 ;; esac
+--- /usr/sbin/simmanager-jio-ensure.v1
++++ /usr/sbin/simmanager-jio-ensure.v2
+@@
+-signature="${iccid}|${imsi}|jionet|IPV4V6|nat1|clat1"
++signature="v2|${iccid}|${imsi}|jionet|IPV4V6|nat1|clat1"
++previous_signature=$(cat "$marker" 2>/dev/null)
+@@
+-if [ "$(cat "$marker" 2>/dev/null)" = "$signature" ] && [ "$nat" = 1 ] && [ "$clat" = 1 ]; then
++if [ "$previous_signature" = "$signature" ] && [ "$nat" = 1 ] && [ "$clat" = 1 ]; then
+@@
+-if [ "$nat" != 1 ]; then
++if [ "$previous_signature" != "$signature" ] || [ "$nat" != 1 ]; then

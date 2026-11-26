@@ -1,0 +1,12 @@
+--- ping_cellular.sh.before
++++ ping_cellular.sh.after
+@@
++monitor_id="${count:-default}"
++instance_lock="/tmp/ping_cellular_${monitor_id}.lock"
++# Refuse a duplicate live monitor and recover a stale lock.
+@@
+-timeout 3 ping ... > /tmp/ping_cellular${count}
++: > "$working"
++timeout 3 ping ... >> "$working"
+ ...
++mv -f "$working" "$output"

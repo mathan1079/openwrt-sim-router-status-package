@@ -1,0 +1,10 @@
+Vendor behavior before this tweak:
+
+1. QCFG replies were accepted when they merely contained OK and any +QCFG line.
+2. A reply belonging to another simultaneous AT request could therefore be parsed
+   as a transport mismatch and trigger AT+CFUN=1,1.
+3. One ping sample without "64 bytes" triggered AT+CFUN=1 and ifup cellular.
+4. Any malformed QNETDEVCTL reply was treated as a stopped data call.
+
+The full pre-change worker is archived at:
+tweaks/cellular_worker_single_instance_fix/changed/usr/sbin/cellular/quectel_rm500u

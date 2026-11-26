@@ -1,0 +1,400 @@
+#!/bin/sh
+
+# Activation and rollback wrapper for the vendor cellular service.
+# This script never writes firmware, bootloader, kernel or vendor script files.
+
+status_file=${SIMMANAGER_CONTROL_STATUS_FILE:-/tmp/simmanager-activation.json}
+status_new=${SIMMANAGER_CONTROL_STATUS_NEW:-/tmp/simmanager-activation.json.new}
+lock_dir=${SIMMANAGER_CONTROL_LOCK_DIR:-/tmp/simmanager-control.lock}
+backup_root=${SIMMANAGER_CONTROL_BACKUP_ROOT:-/etc/simmanager/backups}
+cellular_config=${SIMMANAGER_CONTROL_CELLULAR_CONFIG:-/etc/config/cellular}
+legacy_latest_file="$backup_root/latest"
+manual_latest_file="$backup_root/manual-latest"
+manual_history_file="$backup_root/manual-history"
+manual_history_new="$backup_root/manual-history.new"
+automatic_latest_file="$backup_root/automatic-latest"
+automatic_request=0
+at_lock=${SIMMANAGER_AT_LOCK:-/tmp/simmanager-at.lock}
+
+locked_at() {
+	(
+		flock -x 9
+		at-cmd "$@"
+	) 9>"$at_lock"
+}
+
+automation_allowed() {
+	[ "$automatic_request" != "1" ] || [ "$(uci -q get cellular.cellular.hw_asw)" != "1" ]
+}
+
+write_status() {
+	state="$1"
+	message="$2"
+	target="${3:-}"
+	backup="${4:-}"
+	rollback_available=0
+	[ -n "$backup" ] && [ -f "$backup/cellular" ] && rollback_available=1
+	backup_kind=""
+	[ -n "$backup" ] && backup_kind=$(sed -n 's/^backup_kind=//p' "$backup/metadata" 2>/dev/null | head -n 1)
+
+	. /usr/share/libubox/jshn.sh
+	json_init
+	json_add_string state "$state"
+	json_add_string message "$message"
+	json_add_string target "$target"
+	json_add_string backup "$backup"
+	json_add_string backup_kind "${backup_kind:-unknown}"
+	json_add_string rollback_available "$rollback_available"
+	json_add_string updated_at "$(date +%s)"
+	json_dump > "$status_new" && mv -f "$status_new" "$status_file"
+	json_cleanup
+}
+
+show_status() {
+	if [ -f "$status_file" ]; then
+		cat "$status_file"
+	else
+		printf '{"state":"idle","message":"No activation has been started.","rollback_available":"0"}\n'
+	fi
+}
+
+release_lock() {
+	rmdir "$lock_dir" 2>/dev/null
+}
+
+acquire_lock() {
+	if ! mkdir "$lock_dir" 2>/dev/null; then
+		write_status failed "Another activation or rollback operation is already running." "${1:-}" "${2:-}"
+		return 1
+	fi
+	trap release_lock EXIT HUP INT TERM
+}
+
+profile_value() {
+	uci -q get "simmanager.$1.$2"
+}
+
+validate_printable() {
+	value="$1"
+	max_length="$2"
+	[ "${#value}" -le "$max_length" ] || return 1
+	[ -z "$value" ] || ! printf '%s' "$value" | LC_ALL=C grep -q '[^ -~]'
+}
+
+load_profile() {
+	target="$1"
+	[ "$target" = sim1 ] || [ "$target" = sim2 ] || return 1
+	[ "$(uci -q get "simmanager.$target")" = profile ] || return 1
+
+	apn_auto=$(profile_value "$target" apn_auto); apn_auto=${apn_auto:-0}
+	apn=$(profile_value "$target" apn); apn=${apn:-}
+	pdp=$(profile_value "$target" pdp_type); pdp=${pdp:-IPV4V6}
+	pin=$(profile_value "$target" pin); pin=${pin:-}
+	auth_enabled=$(profile_value "$target" auth_enabled); auth_enabled=${auth_enabled:-0}
+	username=$(profile_value "$target" username); username=${username:-}
+	password=$(profile_value "$target" password); password=${password:-}
+	auth_type=$(profile_value "$target" auth_type); auth_type=${auth_type:-3}
+	network_mode=$(profile_value "$target" network_mode); network_mode=${network_mode:-AUTO}
+	band_auto=$(profile_value "$target" band_auto); band_auto=${band_auto:-1}
+
+	case "$apn_auto" in 0|1) ;; *) return 1 ;; esac
+	[ "$apn_auto" = 1 ] || [ -n "$apn" ] || return 1
+	case "$apn" in *[!A-Za-z0-9._-]*) return 1 ;; esac
+	[ "${#apn}" -le 100 ] || return 1
+	case "$pdp" in IP|IPV6|IPV4V6) ;; *) return 1 ;; esac
+	case "$pin" in ''|*[!0-9]*) [ -z "$pin" ] || return 1 ;; esac
+	[ -z "$pin" ] || { [ "${#pin}" -ge 4 ] && [ "${#pin}" -le 8 ]; } || return 1
+	case "$auth_enabled" in 0|1) ;; *) return 1 ;; esac
+	case "$auth_type" in 0|1|2|3) ;; *) return 1 ;; esac
+	case "$network_mode" in AUTO|LTE|NR5G:LTE|NR5G) ;; *) return 1 ;; esac
+	[ "$band_auto" = 1 ] || return 1
+	validate_printable "$username" 128 || return 1
+	validate_printable "$password" 128 || return 1
+	return 0
+}
+
+create_backup() {
+	target="$1"
+	backup_kind="${2:-manual}"
+	[ "$backup_kind" = manual ] || [ "$backup_kind" = automatic ] || return 1
+	stamp=$(date +%Y%m%d-%H%M%S)
+	backup="$backup_root/$stamp-$$"
+	mkdir -p "$backup" || return 1
+	cp -p "$cellular_config" "$backup/cellular" || return 1
+	uci export cellular > "$backup/cellular.uci" || return 1
+	sha256sum "$backup/cellular" | awk '{print $1}' > "$backup/cellular.sha256" || return 1
+	old_sim=$(uci -q get cellular.cellular.hw_sim); old_sim=${old_sim:-unknown}
+	{
+		printf 'active_sim=%s\n' "$old_sim"
+		printf 'target_sim=%s\n' "$target"
+		printf 'created_at=%s\n' "$(date +%s)"
+		printf 'backup_kind=%s\n' "$backup_kind"
+	} > "$backup/metadata"
+	if [ "$backup_kind" = automatic ]; then
+		printf '%s\n' "$backup" > "$automatic_latest_file"
+	else
+		printf '%s\n' "$backup" > "$manual_latest_file"
+		printf '%s\n' "$backup" > "$legacy_latest_file"
+		{
+			printf '%s\n' "$backup"
+			[ -f "$manual_history_file" ] && cat "$manual_history_file"
+		} | awk '!seen[$0]++ && count < 5 { print; count++ }' > "$manual_history_new" &&
+			mv -f "$manual_history_new" "$manual_history_file"
+	fi
+	printf '%s\n' "$backup"
+}
+
+set_cellular_option() {
+	uci set "cellular.cellular.$1=$2"
+}
+
+apply_profile_config() {
+	set_cellular_option m_apn_auto "$apn_auto" || return 1
+	set_cellular_option m_apn "$apn" || return 1
+	set_cellular_option m_pdp "$pdp" || return 1
+	set_cellular_option m_context "$auth_enabled" || return 1
+	set_cellular_option m_username "$username" || return 1
+	set_cellular_option m_password "$password" || return 1
+	set_cellular_option m_auth "$auth_type" || return 1
+	set_cellular_option m_netmode "$network_mode" || return 1
+	set_cellular_option m_band_auto 1 || return 1
+	if [ -n "$pin" ]; then
+		set_cellular_option m_pin "$pin" || return 1
+	else
+		uci -q delete cellular.cellular.m_pin
+	fi
+	uci commit cellular || return 1
+	sync
+}
+
+wait_for_sim_ready() {
+	ignore_guard="${1:-0}"
+	query_port=/dev/ttyUSB3
+	[ -c "$query_port" ] || query_port=$(uci -q get cellular.cellular.atdev)
+	count=0
+	while [ "$count" -lt 30 ]; do
+		[ "$ignore_guard" = rollback ] || automation_allowed || return 1
+		locked_at "$query_port" 'AT+CPIN?' 2>/dev/null | tr -d '\r' | grep -q '+CPIN: READY' && return 0
+		count=$((count + 1))
+		sleep 2
+	done
+	return 1
+}
+
+wait_for_registration() {
+	query_port=/dev/ttyUSB3
+	[ -c "$query_port" ] || query_port=$(uci -q get cellular.cellular.atdev)
+	count=0
+	while [ "$count" -lt 45 ]; do
+		automation_allowed || return 1
+		registration=$(locked_at "$query_port" 'AT+CEREG?' 2>/dev/null | tr -d '\r' | grep '+CEREG:' | tail -n 1)
+		case "$registration" in *,1|*,1,*|*,5|*,5,*) return 0 ;; esac
+		count=$((count + 1))
+		sleep 2
+	done
+	return 1
+}
+
+vendor_switch() {
+	target="$1"
+	. /lib/functions/cellular.sh
+	cellular_sw "$target" 1
+}
+
+restore_backup() {
+	backup="$1"
+	case "$backup" in "$backup_root"/*) ;; *) return 1 ;; esac
+	[ -f "$backup/cellular" ] || return 1
+	[ -f "$backup/cellular.sha256" ] || return 1
+	expected_hash=$(cat "$backup/cellular.sha256")
+	actual_hash=$(sha256sum "$backup/cellular" | awk '{print $1}')
+	[ -n "$expected_hash" ] && [ "$expected_hash" = "$actual_hash" ] || return 1
+	old_sim=$(sed -n 's/^active_sim=//p' "$backup/metadata" | head -n 1)
+	[ "$old_sim" = sim1 ] || [ "$old_sim" = sim2 ] || return 1
+	physical_sim=$(uci -q get cellular.cellular.hw_sim)
+	cp -p "$backup/cellular" "$cellular_config" || return 1
+	sync
+	if [ "$physical_sim" != "$old_sim" ]; then
+		vendor_switch "$old_sim" || return 1
+		wait_for_sim_ready rollback || return 1
+	fi
+	/etc/init.d/cellular reload || return 1
+	return 0
+}
+
+set_request_mode() {
+	request_mode="${1:-manual}"
+	case "$request_mode" in
+		automatic)
+			automatic_request=1
+			requested_backup_kind=automatic
+			;;
+		manual|manual-keep|manual-disable)
+			automatic_request=0
+			requested_backup_kind=manual
+			;;
+		*) return 1 ;;
+	esac
+}
+
+activate_profile() {
+	target="$1"
+	if ! set_request_mode "${2:-manual}"; then
+		write_status failed "Unknown activation request mode; no changes were made." "$target" ""
+		return 2
+	fi
+	if ! automation_allowed; then
+		write_status blocked "Automatic activation was cancelled because the vendor Automatic SIM card switching controller is enabled." "$target" ""
+		return 1
+	fi
+	acquire_lock "$target" "" || return 1
+	write_status validating "Validating $target profile. No changes have been made yet." "$target" ""
+	if ! load_profile "$target"; then
+		write_status failed "Profile validation failed. Manual APN profiles require an APN and automatic band selection." "$target" ""
+		return 1
+	fi
+
+	mkdir -p "$backup_root" || {
+		write_status failed "Could not create the persistent backup directory. No changes were made." "$target" ""
+		return 1
+	}
+	write_status backing_up "Backing up the complete cellular configuration before making changes." "$target" ""
+	backup=$(create_backup "$target" "$requested_backup_kind") || {
+		write_status failed "Backup failed. Activation was cancelled before any configuration change." "$target" ""
+		return 1
+	}
+	if ! automation_allowed; then
+		write_status blocked "Automatic activation stopped before any cellular change because the vendor controller was enabled." "$target" "$backup"
+		return 1
+	fi
+
+	old_sim=$(sed -n 's/^active_sim=//p' "$backup/metadata" | head -n 1)
+	write_status applying "Applying the saved profile to vendor-supported cellular settings." "$target" "$backup"
+	if ! apply_profile_config; then
+		write_status rolling_back "Applying the profile failed; restoring the previous configuration." "$target" "$backup"
+		restore_backup "$backup"
+		write_status failed "Profile application failed. Automatic rollback was attempted." "$target" "$backup"
+		return 1
+	fi
+	if ! automation_allowed; then
+		write_status rolling_back "The vendor automatic controller was enabled; restoring the pre-activation configuration." "$target" "$backup"
+		restore_backup "$backup"
+		write_status blocked "Automatic activation stopped and rollback was attempted because the vendor controller is enabled." "$target" "$backup"
+		return 1
+	fi
+
+	if [ "$old_sim" != "$target" ]; then
+		if ! automation_allowed; then
+			write_status rolling_back "The vendor automatic controller was enabled before SIM switching; restoring the previous configuration." "$target" "$backup"
+			restore_backup "$backup"
+			write_status blocked "Automatic SIM switching was cancelled because the vendor controller is enabled." "$target" "$backup"
+			return 1
+		fi
+		write_status switching "Switching the SIM through the existing vendor mechanism." "$target" "$backup"
+		if ! vendor_switch "$target" || ! wait_for_sim_ready; then
+			write_status rolling_back "SIM switch did not become ready; restoring the previous SIM and configuration." "$target" "$backup"
+			restore_backup "$backup"
+			write_status failed "SIM switch failed. Automatic rollback was attempted." "$target" "$backup"
+			return 1
+		fi
+	fi
+
+	if ! automation_allowed; then
+		write_status rolling_back "The vendor automatic controller was enabled; restoring the previous SIM and configuration." "$target" "$backup"
+		restore_backup "$backup"
+		write_status blocked "Automatic activation stopped and rollback was attempted because the vendor controller is enabled." "$target" "$backup"
+		return 1
+	fi
+	write_status waiting "Reloading cellular service and waiting for network registration." "$target" "$backup"
+	if ! /etc/init.d/cellular reload || ! wait_for_registration; then
+		write_status rolling_back "Network registration failed; restoring the previous SIM and configuration." "$target" "$backup"
+		restore_backup "$backup"
+		write_status failed "The selected SIM did not register. Automatic rollback was attempted." "$target" "$backup"
+		return 1
+	fi
+
+	if [ "$request_mode" = manual-keep ] && [ "$(uci -q get simmanager.automation.enabled)" = "1" ]; then
+		/usr/sbin/simmanager-auto manual-activation "$target" >/dev/null 2>&1 || true
+	fi
+	write_status success "$target profile is active and registered. The backup remains available for rollback." "$target" "$backup"
+}
+
+metadata_value() {
+	backup="$1"
+	key="$2"
+	sed -n "s/^$key=//p" "$backup/metadata" 2>/dev/null | head -n 1
+}
+
+resolve_manual_backup() {
+	requested="${1:-}"
+	if [ -n "$requested" ]; then
+		case "$requested" in *[!0-9-]*) return 1 ;; esac
+		backup="$backup_root/$requested"
+		grep -Fqx "$backup" "$manual_history_file" 2>/dev/null || return 1
+	else
+		backup=$(sed -n '1p' "$manual_history_file" 2>/dev/null)
+		[ -n "$backup" ] || backup=$(cat "$manual_latest_file" 2>/dev/null)
+		[ -n "$backup" ] || backup=$(cat "$legacy_latest_file" 2>/dev/null)
+	fi
+	printf '%s\n' "$backup"
+}
+
+show_manual_history() {
+	. /usr/share/libubox/jshn.sh
+	json_init
+	json_add_array backups
+	if [ -f "$manual_history_file" ]; then
+		while IFS= read -r backup; do
+			case "$backup" in "$backup_root"/*) ;; *) continue ;; esac
+			[ -f "$backup/cellular" ] || continue
+			json_add_object ""
+			json_add_string id "$(basename "$backup")"
+			json_add_string active_sim "$(metadata_value "$backup" active_sim)"
+			json_add_string target_sim "$(metadata_value "$backup" target_sim)"
+			json_add_string created_at "$(metadata_value "$backup" created_at)"
+			json_close_object
+		done < "$manual_history_file"
+	fi
+	json_close_array
+	json_dump
+	json_cleanup
+}
+
+rollback_backup() {
+	rollback_kind="${1:-manual}"
+	requested="${2:-}"
+	case "$rollback_kind" in
+		manual) backup=$(resolve_manual_backup "$requested") ;;
+		automatic) backup=$(cat "$automatic_latest_file" 2>/dev/null) ;;
+		*) backup="" ;;
+	esac
+	acquire_lock "" "$backup" || return 1
+	case "$backup" in "$backup_root"/*) ;; *)
+		write_status failed "No valid rollback backup is available." "" ""
+		return 1
+		;;
+	esac
+	stored_kind=$(metadata_value "$backup" backup_kind)
+	if [ "$rollback_kind" = automatic ] && [ "$stored_kind" != automatic ]; then
+		write_status failed "The automatic rollback checkpoint is invalid or belongs to a manual operation." "" ""
+		return 1
+	fi
+	write_status rolling_back "Restoring the previous cellular configuration and active SIM from the $rollback_kind checkpoint." "" "$backup"
+	if restore_backup "$backup"; then
+		write_status rollback_complete "Previous cellular configuration and SIM were restored from the $rollback_kind checkpoint." "" "$backup"
+		return 0
+	fi
+	write_status failed "Rollback did not complete. The backup remains untouched for manual recovery." "" "$backup"
+	return 1
+}
+
+[ "${SIMMANAGER_CONTROL_LIBRARY_ONLY:-0}" = "1" ] && return 0
+
+case "${1:-status}" in
+	status) show_status ;;
+	history) show_manual_history ;;
+	activate) activate_profile "${2:-}" "${3:-}" ;;
+	rollback) rollback_backup "${2:-manual}" "${3:-}" ;;
+	*) printf 'Usage: %s {status|history|activate sim1|activate sim2|rollback manual [id]|rollback automatic}\n' "$0" >&2; exit 2 ;;
+esac
+
