@@ -1,0 +1,24 @@
+<% local d = self.data or {}
+local function stamp(t)
+    t = tonumber(t) or 0
+    return t > 0 and os.date("%Y-%m-%d %H:%M:%S %Z", t) or translate("Never / not scheduled")
+end
+local function esc(v) return pcdata(tostring(v or "")) end
+%>
+<h3><%:Status%></h3>
+<table class="table cbi-section-table">
+<tr><td><%:Status%></td><td><%=esc(d.enabled and (d.running and translate("Scheduled") or translate("Enabled, service stopped")) or translate("Scheduling disabled"))%></td></tr>
+<tr><td><%:Saved action%></td><td><%=esc(d.mode)%></td></tr>
+<tr><td><%:Last scan%></td><td><%=esc(stamp(d.last_scan))%></td></tr>
+<tr><td><%:Last cleared time%></td><td><%=esc(stamp(d.last_clear))%></td></tr>
+<tr><td><%:Next scan / clearing attempt%></td><td><%=esc(stamp(d.next_scan))%></td></tr>
+<tr><td><%:Last scan action%></td><td><%=esc(d.scan_mode)%></td></tr>
+<tr><td><%:Candidates / removed / failures%></td><td><%=esc(d.found or 0)%> / <%=esc(d.removed or 0)%> / <%=esc(d.failed or 0)%></td></tr>
+</table>
+<table class="table cbi-section-table">
+<tr><th><%:Device%></th><th><%:Deprecated public IPv6%></th><th><%:Result%></th></tr>
+<% for _, a in ipairs(d.addresses or {}) do %>
+<tr><td><%=esc(a.device)%></td><td><%=esc(a.address)%></td><td><%=esc(a.result)%></td></tr>
+<% end %>
+</table>
+<p><%:Reload this page to refresh status. Times and results reset after reboot. The next time is a scan; removal requires removal mode and eligible addresses.%></p>

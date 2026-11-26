@@ -1,0 +1,4 @@
+config cleaner 'main'
+	option enabled '0'
+	option mode 'monitor'
+	option interval '120'

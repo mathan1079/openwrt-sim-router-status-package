@@ -1,0 +1,25 @@
+{
+  "luci-app-ipv6-cleaner": {
+    "description": "Configure and operate IPv6 Cleaner",
+    "read": {
+      "ubus": {
+        "ipv6-cleaner": [
+          "status"
+        ]
+      },
+      "uci": [
+        "ipv6_cleaner"
+      ]
+    },
+    "write": {
+      "ubus": {
+        "ipv6-cleaner": [
+          "run"
+        ]
+      },
+      "uci": [
+        "ipv6_cleaner"
+      ]
+    }
+  }
+}

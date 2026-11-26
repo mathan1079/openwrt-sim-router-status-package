@@ -1,0 +1,15 @@
+#!/bin/sh
+# Accept only global unicast (2000::/3), explicitly deprecated addresses.
+# ip -o emits: index device inet6 address/prefix scope global ...
+awk '
+$3 == "inet6" && $5 == "scope" && $6 == "global" {
+ addr=tolower($4); dev=$2; sub(/@.*/, "", dev)
+ if (addr !~ /^[23][0-9a-f][0-9a-f][0-9a-f]:[0-9a-f:]+\/[0-9]+$/) next
+ if (dev !~ /^[a-zA-Z0-9_.:-]+$/) next
+ deprecated=0; unsafe=0
+ for (i=7; i<=NF; i++) {
+  if ($i == "deprecated") deprecated=1
+  if ($i == "tentative" || $i == "dadfailed") unsafe=1
+ }
+ if (deprecated && !unsafe) print dev, addr
+}'

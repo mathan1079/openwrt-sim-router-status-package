@@ -1,0 +1,3 @@
+#!/bin/sh
+/etc/init.d/ipv6-cleaner enable
+exit 0

@@ -1,0 +1,11 @@
+#!/bin/sh
+case "$1" in
+ list) echo '{"status":{},"run":{}}';;
+ call)
+  case "$2" in
+   status) /usr/sbin/ipv6-cleaner status;;
+   run) /usr/sbin/ipv6-cleaner run;;
+   *) exit 1;;
+  esac;;
+ *) exit 1;;
+esac

@@ -1,0 +1,15 @@
+{
+  "admin/services/ipv6-cleaner": {
+    "title": "IPv6 Cleaner",
+    "order": 65,
+    "action": {
+      "type": "view",
+      "path": "ipv6-cleaner/overview"
+    },
+    "depends": {
+      "acl": [
+        "luci-app-ipv6-cleaner"
+      ]
+    }
+  }
+}
