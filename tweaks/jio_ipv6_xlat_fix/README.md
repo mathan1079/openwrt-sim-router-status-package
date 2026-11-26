@@ -1,5 +1,8 @@
 # Jio IPv6 and 464XLAT permanent fix
 
+> Status: active. The exact current helper and cumulative worker are archived
+> under `../current_first_router/files/usr/sbin/`.
+
 ## Problem
 
 Jio can register the RM500U on 5G SA and provide only a native IPv6 PDP address. The router's IPv4 DHCP interface may appear up, but IPv4 destinations fail unless the modem's built-in CLAT is fully configured. The previous registration check also looked only at LTE `CEREG`, incorrectly treating a valid 5G SA `C5GREG` registration as offline.
@@ -26,6 +29,11 @@ The exact integration delta is archived in `change.patch`. The pre-change
 vendor worker is already archived under
 `tweaks/sim_switch_network_isolation_fix/changed/`, and the pre-change
 controller is archived under `tweaks/sim_switch_timing_fix/original/`.
+
+Current verified hashes:
+
+- `/usr/sbin/simmanager-jio-ensure`: `79cd4504b5c0f41f067b5a408719fada4eb73cd3e8d467b6b3220bb6b9ab42ff`
+- cumulative `/usr/sbin/cellular/quectel_rm500u`: `e160b6270ff7b654320d84be11c1296b71e10138a20f763f44b7dbb7aa8d3c6a`
 
 ## Verified working settings
 

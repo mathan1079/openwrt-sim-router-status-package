@@ -1,5 +1,9 @@
 # Cellular status page crash fix
 
+> Status: active but incorporated into the cumulative RM500U worker. The
+> standalone `changed/` worker in this folder is a historical stage and must
+> not replace the current worker.
+
 ## Purpose
 
 This tweak fixes intermittent failures of the vendor Cellular/LuCI status page caused by invalid or partially-written `/tmp/4ginfo` JSON.
@@ -97,7 +101,7 @@ Confirm the installed checksum:
 sha256sum /usr/sbin/cellular/quectel_rm500u
 ```
 
-Expected:
+Historical stage checksum (not the current cumulative worker):
 
 ```text
 c9dcc49d19cf4cdfd8f2f786ce954ef21109368752b3f99ff36c445f6c5f1cd2

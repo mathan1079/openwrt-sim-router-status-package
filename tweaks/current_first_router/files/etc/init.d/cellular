@@ -1,0 +1,58 @@
+#!/bin/sh /etc/rc.common
+
+. /lib/functions/cellular.sh
+. /lib/functions/esim.sh
+
+START=00
+EXTRA_COMMANDS="network_init"
+EXTRA_COMMANDS="hardware_init"
+EXTRA_COMMANDS="cellular_init"
+
+cell_num=`uci show hw_info 2> /dev/null | grep '=hw_info' | grep "cellular" | wc -l`
+
+network_init() {
+
+	cellular_traversal "${cell_num}" _network_setting "init"
+}
+
+cellular_init() {
+
+	cellular_traversal "${cell_num}" _cellular_setting "init"
+}
+
+hardware_init() {
+
+	cellular_traversal "${cell_num}" _hardware_setting "init"
+}
+
+network_reload() {
+
+	cellular_traversal "${cell_num}" _network_setting "reload"
+}
+
+cellular_reload() {
+
+	cellular_traversal "${cell_num}" _cellular_setting "reload"
+}
+
+hardware_reload() {
+
+	cellular_traversal "${cell_num}" _hardware_setting "reload"
+}
+
+start() {
+
+	network_init  
+	hardware_init
+	cellular_init 
+	watchsystem
+}
+
+reload() {
+
+	network_reload
+	cellular_reload
+	hardware_reload
+	watchsystem
+}
+

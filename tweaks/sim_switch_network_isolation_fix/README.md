@@ -1,5 +1,10 @@
 # SIM-switch network isolation fix
 
+> Status: active. `cellular_Prepare` and `cellular_detect` remain exact
+> standalone outputs. The worker under this folder is the exact historical
+> post-isolation stage; its behavior is incorporated into the cumulative live
+> worker under `../current_first_router/files/`.
+
 ## Purpose
 
 This second-stage tweak prevents a physical SIM change from restarting the
@@ -23,6 +28,9 @@ JSON fix and first-stage network guard.
 | `/usr/sbin/cellular/cellular_Prepare` | `8673828af4d3db599536974d842ba29834f86b8a5d22ea76b4452a9761502da6` | `2989ce2cbb4d80b878b8e84970a573a5c7451ae41cb56101f1e1f634d481721e` |
 | `/usr/sbin/cellular/cellular_detect` | `1069fed330bbd5013ef7aaa9fe88ce00583cd5fa113229510a38cb5f9515f812` | `d4065fcf4534e5c5bf87abe2340d1091ee1df10ed8108b50061dbbf952fa966a` |
 | `/usr/sbin/cellular/quectel_rm500u` | `f039009d59a6c7e28f8d8bb303d4247375e67bf163e7e83f027bfc3079277af5` | `5c48dfa08ccf3a4ccac7243f3998de2905ab04d147b0bcac1f49b4fba6bebb17` |
+
+Current cumulative live worker checksum:
+`e160b6270ff7b654320d84be11c1296b71e10138a20f763f44b7dbb7aa8d3c6a`.
 
 ## Confirmed root causes
 

@@ -1,5 +1,10 @@
 # SIM switch timing fix
 
+> Status: reverted/inactive as of 26 November 2026. Neither `changed/` file in
+> this folder matches the first router. Keep this folder for investigation and
+> history only; do not deploy it without merging and revalidating later Jio and
+> activation-control changes.
+
 ## Scope
 
 This first-router-only change removes a redundant second modem reboot from both SIM Manager activation and the vendor Cellular page's physical SIM-change path. It does not modify the downstream OpenWrt router.

@@ -1,0 +1,5 @@
+
+config info 'device'
+	option interval '60'
+	option feed_action 'all'
+

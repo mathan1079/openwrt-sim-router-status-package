@@ -2,24 +2,39 @@
 
 This directory archives router-level changes that are intentionally kept separate from `luci-app-simmanager`.
 
-Each tweak contains:
+Every new tweak must contain:
 
 - `original/` — the exact file preserved on the router before the change.
-- `changed/` — the exact file currently deployed on the router.
+- `changed/` — the exact file produced by that tweak at the time it was deployed.
 - `change.patch` — a reproducible unified diff.
-- `README.md` — cause, implementation, deployment, verification and rollback documentation.
+- `README.md` — cause, ownership status, implementation, deployment, verification and rollback documentation.
+
+[`current_first_router/`](current_first_router/README.md) is the authoritative
+byte-for-byte snapshot of files currently deployed on the first router. When
+multiple tweaks modify the same vendor file, the current snapshot takes
+precedence over an older tweak's historical `changed/` copy.
+
+[`STATUS.md`](STATUS.md) records which tweaks are active, incorporated into a
+newer cumulative file, or reverted.
 
 ## Available tweaks
 
-| Tweak | Purpose | Router file |
+| Tweak | Ownership status | Router file |
 | --- | --- | --- |
-| [`celluar_crash_fix`](celluar_crash_fix/README.md) | Prevent malformed or partially-written `/tmp/4ginfo` JSON from crashing the Cellular/LuCI status page. The directory name intentionally follows the requested spelling. | `/usr/sbin/cellular/quectel_rm500u` |
-| [`router_watchdog_restart_prevention`](router_watchdog_restart_prevention/README.md) | Continuously feed the board's external hardware watchdog so it does not reboot a healthy router every few minutes. | `/etc/config/watchdog` |
-| [`sim_switch_network_isolation_fix`](sim_switch_network_isolation_fix/README.md) | Correct the vendor physical-interface selection, replace global reloads with cellular-only recovery, and prevent overlapping detector and RM500U workers. | `/usr/sbin/cellular/cellular_Prepare`, `/usr/sbin/cellular/cellular_detect`, `/usr/sbin/cellular/quectel_rm500u` |
-| [`sim_switch_timing_fix`](sim_switch_timing_fix/README.md) | Remove the redundant second modem reboot and report success only after stable registration, addressing and Internet connectivity. | `/etc/init.d/cellular`, `/usr/sbin/simmanager-control` |
-| [`jio_ipv6_xlat_fix`](jio_ipv6_xlat_fix/README.md) | Permanently detect Jio or IPv6-only PDP service, configure RM500U CLAT/NAT, and recognize 5G SA registration. | `/usr/sbin/simmanager-jio-ensure`, `/usr/sbin/cellular/quectel_rm500u`, `/usr/sbin/simmanager-control` |
-| [`cellular_worker_single_instance_fix`](cellular_worker_single_instance_fix/README.md) | Ensure a signalled RM500U worker exits after releasing its lock so an old and replacement worker cannot control the modem simultaneously. | `/usr/sbin/cellular/quectel_rm500u` |
-| [`cellular_ping_monitor_stability_fix`](cellular_ping_monitor_stability_fix/README.md) | Prevent duplicate health monitors and atomically publish completed ping results so a temporary empty file cannot trigger cellular recovery. | `/usr/sbin/ping_cellular.sh` |
-| [`modem_command_collision_restart_fix`](modem_command_collision_restart_fix/README.md) | Validate exact modem replies and prevent crossed AT responses or one failed ping sample from resetting the RM500U and cellular interface. | `/usr/sbin/cellular/quectel_rm500u` |
+| [`celluar_crash_fix`](celluar_crash_fix/README.md) | Active, incorporated into cumulative worker | `/usr/sbin/cellular/quectel_rm500u` |
+| [`router_watchdog_restart_prevention`](router_watchdog_restart_prevention/README.md) | Active, exact standalone file | `/etc/config/watchdog` |
+| [`sim_switch_network_isolation_fix`](sim_switch_network_isolation_fix/README.md) | Active; preparation/detector exact, worker delta incorporated | Three cellular vendor scripts |
+| [`sim_switch_timing_fix`](sim_switch_timing_fix/README.md) | Reverted/inactive; retained for history only | `/etc/init.d/cellular`, `/usr/sbin/simmanager-control` |
+| [`jio_ipv6_xlat_fix`](jio_ipv6_xlat_fix/README.md) | Active, incorporated into cumulative worker and helper | Worker, controller and Jio helper |
+| [`cellular_worker_single_instance_fix`](cellular_worker_single_instance_fix/README.md) | Active, incorporated into cumulative worker | `/usr/sbin/cellular/quectel_rm500u` |
+| [`cellular_ping_monitor_stability_fix`](cellular_ping_monitor_stability_fix/README.md) | Active, exact standalone file | `/usr/sbin/ping_cellular.sh` |
+| [`modem_command_collision_restart_fix`](modem_command_collision_restart_fix/README.md) | Active, latest cumulative worker delta | `/usr/sbin/cellular/quectel_rm500u` |
 
 These files are hardware/firmware-specific to the ZBT-Z8106AX-2SIM router and its vendor OpenWrt build. Do not apply them blindly to another model or firmware revision.
+
+## Mandatory maintenance rule
+
+Every router deployment must update its tweak folder and
+`current_first_router/` in the same task. The work is not complete until the
+live checksum, current snapshot checksum, real unified patch and documentation
+all agree. Never silently overwrite an earlier tweak's `changed/` file.

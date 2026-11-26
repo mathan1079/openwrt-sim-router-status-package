@@ -1,5 +1,7 @@
 # RM500U command-collision restart prevention
 
+> Status: active and the latest change to the cumulative RM500U worker.
+
 ## Symptom
 
 The router uptime remained stable, but the cellular interface and RM500U USB
@@ -31,6 +33,15 @@ and treated malformed `QNETDEVCTL` output as a stopped data call.
 ## Router file
 
 `/usr/sbin/cellular/quectel_rm500u`
+
+## Archived files
+
+| Copy | SHA-256 |
+| --- | --- |
+| `original/usr/sbin/cellular/quectel_rm500u` | `964d7c2c38cbe80ca7ef9d83456fcf77a599377f0099a1423bf2f78ad4309594` |
+| `changed/usr/sbin/cellular/quectel_rm500u` | `e160b6270ff7b654320d84be11c1296b71e10138a20f763f44b7dbb7aa8d3c6a` |
+
+`change.patch` is a complete unified diff between these exact files.
 
 ## Rollback
 

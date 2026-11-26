@@ -1,5 +1,8 @@
 # Cellular worker single-instance signal fix
 
+> Status: active and incorporated into the cumulative RM500U worker archived
+> under `../current_first_router/files/usr/sbin/cellular/quectel_rm500u`.
+
 ## Problem
 
 The RM500U worker used the same cleanup function for `EXIT`, `HUP`, `INT` and
@@ -17,8 +20,8 @@ the cellular interface down and up.
 ## Files
 
 - Router: `/usr/sbin/cellular/quectel_rm500u`
-- Local changed source:
-  `tweaks/sim_switch_network_isolation_fix/changed/usr/sbin/cellular/quectel_rm500u`
+- Current cumulative source:
+  `tweaks/current_first_router/files/usr/sbin/cellular/quectel_rm500u`
 - Reproducible delta: `change.patch`
 
 ## Verification
