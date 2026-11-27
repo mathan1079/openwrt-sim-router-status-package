@@ -1,0 +1,6 @@
+5dcbd089aa4f53134e97b1d75adcbf52bd9cbd64d00bfc3cd88c5144b0669757  ./README.md
+e8c802a53f44be14f84ffc78eb6c4d86d6e26a231bf94a04bf522d36e9a81247  ./change.patch
+057ebe709eebd04c01738bc1b74112071633fef9a859c6bafc4877299175f62e  ./changed/etc/config/cellular
+486a573f919aeacbb143b8c800e76d4269b5f138484fa11f920852440693f1a7  ./changed/etc/config/simmanager
+e5675788a38f9c8576b64dab7c39e8e343319cb52e6e39a85b06d7992d5282a9  ./changed/usr/lib/lua/luci/model/cbi/simmanager/profiles.lua
+878b90034af5905a100e98679b79e97559a12d72226efd2f543d84f5c4d7ea17  ./changed/usr/sbin/simmanager-jio-ensure

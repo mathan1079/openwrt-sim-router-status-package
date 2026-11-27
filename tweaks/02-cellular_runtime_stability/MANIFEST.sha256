@@ -1,0 +1,6 @@
+4a4a1c5f1720af8206a1f1b88bacda52561ed4111c56f061ba817fd260336ada  ./README.md
+9241228fc5960332c589f5d85e22f86f9af02343462f6c63293304e0f5dee617  ./change.patch
+2989ce2cbb4d80b878b8e84970a573a5c7451ae41cb56101f1e1f634d481721e  ./changed/usr/sbin/cellular/cellular_Prepare
+d4065fcf4534e5c5bf87abe2340d1091ee1df10ed8108b50061dbbf952fa966a  ./changed/usr/sbin/cellular/cellular_detect
+901bc55e8dc52e6df83a7be6d482d28bfe50d9f9442fb66d3ea29519b073aeba  ./changed/usr/sbin/cellular/quectel_rm500u
+03b950c00196d268fd69546f90d21b08a1893609cbbf1fb2916ae9456ea8dc07  ./changed/usr/sbin/ping_cellular.sh

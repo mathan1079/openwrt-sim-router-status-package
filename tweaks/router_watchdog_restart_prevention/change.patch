@@ -1,9 +1,0 @@
---- original/etc/config/watchdog
-+++ changed/etc/config/watchdog
-@@ -1,5 +1,5 @@
- 
- config info 'device'
- 	option interval '60'
--	option feed_action 'none'
-+	option feed_action 'all'
- 

@@ -1,0 +1,401 @@
+--- original/usr/sbin/simmanager-control
++++ changed/usr/sbin/simmanager-control
+@@ -15,11 +15,16 @@
+ automatic_latest_file="$backup_root/automatic-latest"
+ automatic_request=0
+ at_lock=${SIMMANAGER_AT_LOCK:-/tmp/simmanager-at.lock}
++activation_probe_hosts=${SIMMANAGER_ACTIVATION_PROBES:-"1.1.1.1 8.8.8.8 9.9.9.9"}
++activation_probe_hosts_v6=${SIMMANAGER_ACTIVATION_PROBES_V6:-"2606:4700:4700::1111 2001:4860:4860::8888 2620:fe::fe"}
++activation_monitor_interval=${SIMMANAGER_ACTIVATION_INTERVAL:-2}
++activation_required_successes=${SIMMANAGER_ACTIVATION_SUCCESSES:-2}
++activation_max_checks=${SIMMANAGER_ACTIVATION_MAX_CHECKS:-45}
+ 
+ locked_at() {
+ 	(
+-		flock -x 9
+-		at-cmd "$@"
++		flock -w 3 -x 9 || exit 75
++		timeout 6 at-cmd "$@"
+ 	) 9>"$at_lock"
+ }
+ 
+@@ -94,7 +99,7 @@
+ 	username=$(profile_value "$target" username); username=${username:-}
+ 	password=$(profile_value "$target" password); password=${password:-}
+ 	auth_type=$(profile_value "$target" auth_type); auth_type=${auth_type:-3}
+-	network_mode=$(profile_value "$target" network_mode); network_mode=${network_mode:-AUTO}
++	network_mode=$(profile_value "$target" network_mode); network_mode=${network_mode:-NR5G:LTE}
+ 	band_auto=$(profile_value "$target" band_auto); band_auto=${band_auto:-1}
+ 
+ 	case "$apn_auto" in 0|1) ;; *) return 1 ;; esac
+@@ -106,7 +111,7 @@
+ 	[ -z "$pin" ] || { [ "${#pin}" -ge 4 ] && [ "${#pin}" -le 8 ]; } || return 1
+ 	case "$auth_enabled" in 0|1) ;; *) return 1 ;; esac
+ 	case "$auth_type" in 0|1|2|3) ;; *) return 1 ;; esac
+-	case "$network_mode" in AUTO|LTE|NR5G:LTE|NR5G) ;; *) return 1 ;; esac
++	case "$network_mode" in LTE|NR5G-SA|NR5G-NSA|NR5G|NR5G:LTE|NR5G-SA:LTE|NR5G-NSA:LTE) ;; *) return 1 ;; esac
+ 	[ "$band_auto" = 1 ] || return 1
+ 	validate_printable "$username" 128 || return 1
+ 	validate_printable "$password" 128 || return 1
+@@ -174,6 +179,9 @@
+ 	count=0
+ 	while [ "$count" -lt 30 ]; do
+ 		[ "$ignore_guard" = rollback ] || automation_allowed || return 1
++		# A routed 2-of-3 Internet proof is stronger evidence than a CPIN
++		# query and prevents a busy AT port from holding a completed switch.
++		activation_health_check && return 0
+ 		locked_at "$query_port" 'AT+CPIN?' 2>/dev/null | tr -d '\r' | grep -q '+CPIN: READY' && return 0
+ 		count=$((count + 1))
+ 		sleep 2
+@@ -187,16 +195,85 @@
+ 	count=0
+ 	while [ "$count" -lt 45 ]; do
+ 		automation_allowed || return 1
++		activation_health_check && return 0
+ 		registration=$(locked_at "$query_port" 'AT+CEREG?' 2>/dev/null | tr -d '\r' | grep '+CEREG:' | tail -n 1)
++		registration_5g=$(locked_at "$query_port" 'AT+C5GREG?' 2>/dev/null | tr -d '\r' | grep '+C5GREG:' | tail -n 1)
+ 		case "$registration" in *,1|*,1,*|*,5|*,5,*) return 0 ;; esac
++		case "$registration_5g" in *,1|*,1,*|*,5|*,5,*) return 0 ;; esac
+ 		count=$((count + 1))
+ 		sleep 2
+ 	done
+ 	return 1
+ }
+ 
++cellular_device() {
++	json=$(ubus call network.interface.cellular status 2>/dev/null) || return 1
++	up=$(jsonfilter -s "$json" -e '@.up' 2>/dev/null)
++	[ "$up" = true ] || return 1
++	active_profile=$(uci -q get cellular.cellular.hw_sim)
++	probe_pdp=$(uci -q get "simmanager.${active_profile}.pdp_type")
++	[ -n "$probe_pdp" ] || probe_pdp=$(uci -q get cellular.cellular.m_pdp)
++	if [ "$probe_pdp" = IPV6 ]; then
++		address=$(jsonfilter -s "$json" -e '@["ipv6-address"][0].address' 2>/dev/null)
++	else
++		address=$(jsonfilter -s "$json" -e '@["ipv4-address"][0].address' 2>/dev/null)
++	fi
++	[ -n "$address" ] || return 1
++	device=$(jsonfilter -s "$json" -e '@.l3_device' 2>/dev/null)
++	[ -n "$device" ] || device=$(jsonfilter -s "$json" -e '@.device' 2>/dev/null)
++	[ -n "$device" ] || return 1
++	printf '%s\n' "$device"
++}
++
++activation_health_check() {
++	device=$(cellular_device) || return 1
++	active_profile=$(uci -q get cellular.cellular.hw_sim)
++	probe_pdp=$(uci -q get "simmanager.${active_profile}.pdp_type")
++	[ -n "$probe_pdp" ] || probe_pdp=$(uci -q get cellular.cellular.m_pdp)
++	probe_command=ping
++	health_hosts="$activation_probe_hosts"
++	if [ "$probe_pdp" = IPV6 ]; then
++		command -v ping6 >/dev/null 2>&1 || return 1
++		probe_command=ping6
++		health_hosts="$activation_probe_hosts_v6"
++	fi
++	success=0
++	pids=""
++	for host in $health_hosts; do
++		"$probe_command" -I "$device" -c 1 -W 2 "$host" >/dev/null 2>&1 &
++		pids="$pids $!"
++	done
++	for pid in $pids; do
++		wait "$pid" && success=$((success + 1))
++	done
++	[ "$success" -ge 2 ]
++}
++
++wait_for_stable_connectivity() {
++	checks=0
++	consecutive=0
++	while [ "$checks" -lt "$activation_max_checks" ]; do
++		automation_allowed || return 1
++		if activation_health_check; then
++			consecutive=$((consecutive + 1))
++			[ "$consecutive" -ge "$activation_required_successes" ] && return 0
++		else
++			consecutive=0
++		fi
++		checks=$((checks + 1))
++		[ "$checks" -lt "$activation_max_checks" ] && sleep "$activation_monitor_interval"
++	done
++	return 1
++}
++
+ vendor_switch() {
+ 	target="$1"
++	if [ -x /usr/sbin/simmanager-fast-switch ]; then
++		/usr/sbin/simmanager-fast-switch "$target" 1
++		fast_status=$?
++		[ "$fast_status" = 0 ] && return 0
++		logger -t simmanager-fast-switch "Fast path is unsupported or unavailable (status ${fast_status}); using the unchanged vendor switch."
++	fi
+ 	. /lib/functions/cellular.sh
+ 	cellular_sw "$target" 1
+ }
+@@ -214,14 +291,32 @@
+ 	physical_sim=$(uci -q get cellular.cellular.hw_sim)
+ 	cp -p "$backup/cellular" "$cellular_config" || return 1
+ 	sync
++	restored_switch=0
+ 	if [ "$physical_sim" != "$old_sim" ]; then
+ 		vendor_switch "$old_sim" || return 1
+ 		wait_for_sim_ready rollback || return 1
++		restored_switch=1
+ 	fi
+-	/etc/init.d/cellular reload || return 1
+-	return 0
++	[ "$restored_switch" = 1 ] || /etc/init.d/cellular reload || return 1
++	wait_for_stable_connectivity
+ }
+ 
++finish_failed_activation() {
++	target="$1"
++	backup="$2"
++	success_state="$3"
++	success_message="$4"
++	critical_message="$5"
++	if restore_backup "$backup"; then
++		write_status "$success_state" "$success_message" "$target" "$backup"
++		return 1
++	fi
++	# Exit 3 is reserved for an activation failure whose rollback also failed.
++	# The automatic controller treats this as an unsafe state and disables itself.
++	write_status critical "$critical_message" "$target" "$backup"
++	return 3
++}
++
+ set_request_mode() {
+ 	request_mode="${1:-manual}"
+ 	case "$request_mode" in
+@@ -272,46 +367,65 @@
+ 	write_status applying "Applying the saved profile to vendor-supported cellular settings." "$target" "$backup"
+ 	if ! apply_profile_config; then
+ 		write_status rolling_back "Applying the profile failed; restoring the previous configuration." "$target" "$backup"
+-		restore_backup "$backup"
+-		write_status failed "Profile application failed. Automatic rollback was attempted." "$target" "$backup"
+-		return 1
++		finish_failed_activation "$target" "$backup" failed \
++			"Profile application failed. The previous configuration was restored." \
++			"Profile application failed and rollback could not restore verified connectivity."
++		return $?
+ 	fi
+ 	if ! automation_allowed; then
+ 		write_status rolling_back "The vendor automatic controller was enabled; restoring the pre-activation configuration." "$target" "$backup"
+-		restore_backup "$backup"
+-		write_status blocked "Automatic activation stopped and rollback was attempted because the vendor controller is enabled." "$target" "$backup"
+-		return 1
++		finish_failed_activation "$target" "$backup" blocked \
++			"Automatic activation stopped and the previous configuration was restored because the vendor controller is enabled." \
++			"The vendor controller was enabled and rollback could not restore verified connectivity."
++		return $?
+ 	fi
+ 
++	did_switch=0
+ 	if [ "$old_sim" != "$target" ]; then
+ 		if ! automation_allowed; then
+ 			write_status rolling_back "The vendor automatic controller was enabled before SIM switching; restoring the previous configuration." "$target" "$backup"
+-			restore_backup "$backup"
+-			write_status blocked "Automatic SIM switching was cancelled because the vendor controller is enabled." "$target" "$backup"
+-			return 1
++			finish_failed_activation "$target" "$backup" blocked \
++				"Automatic SIM switching was cancelled and the previous configuration was restored because the vendor controller is enabled." \
++				"The vendor controller was enabled before switching and rollback could not restore verified connectivity."
++			return $?
+ 		fi
+ 		write_status switching "Switching the SIM through the existing vendor mechanism." "$target" "$backup"
+ 		if ! vendor_switch "$target" || ! wait_for_sim_ready; then
+ 			write_status rolling_back "SIM switch did not become ready; restoring the previous SIM and configuration." "$target" "$backup"
+-			restore_backup "$backup"
+-			write_status failed "SIM switch failed. Automatic rollback was attempted." "$target" "$backup"
+-			return 1
++			finish_failed_activation "$target" "$backup" failed \
++				"SIM switch failed. The previous SIM and configuration were restored." \
++				"SIM switch failed and rollback could not restore verified connectivity."
++			return $?
+ 		fi
++		did_switch=1
+ 	fi
+ 
+ 	if ! automation_allowed; then
+ 		write_status rolling_back "The vendor automatic controller was enabled; restoring the previous SIM and configuration." "$target" "$backup"
+-		restore_backup "$backup"
+-		write_status blocked "Automatic activation stopped and rollback was attempted because the vendor controller is enabled." "$target" "$backup"
+-		return 1
++		finish_failed_activation "$target" "$backup" blocked \
++			"Automatic activation stopped and the previous SIM and configuration were restored because the vendor controller is enabled." \
++			"The vendor controller was enabled and rollback could not restore verified connectivity."
++		return $?
+ 	fi
+-	write_status waiting "Reloading cellular service and waiting for network registration." "$target" "$backup"
+-	if ! /etc/init.d/cellular reload || ! wait_for_registration; then
+-		write_status rolling_back "Network registration failed; restoring the previous SIM and configuration." "$target" "$backup"
+-		restore_backup "$backup"
+-		write_status failed "The selected SIM did not register. Automatic rollback was attempted." "$target" "$backup"
+-		return 1
++	if [ "$did_switch" = 1 ]; then
++		write_status waiting "Waiting for the switched SIM to provide verified Internet connectivity." "$target" "$backup"
++	else
++		write_status waiting "Reloading the active SIM profile and waiting for verified Internet connectivity." "$target" "$backup"
++		/etc/init.d/cellular reload || {
++			write_status rolling_back "Cellular profile reload failed; restoring the previous configuration." "$target" "$backup"
++			finish_failed_activation "$target" "$backup" failed \
++				"The selected profile could not be reloaded. The previous configuration was restored." \
++				"The selected profile could not be reloaded and rollback could not restore verified connectivity."
++			return $?
++		}
+ 	fi
++	if ! wait_for_stable_connectivity; then
++		write_status rolling_back "Internet verification failed; restoring the previous SIM and configuration." "$target" "$backup"
++		finish_failed_activation "$target" "$backup" failed \
++			"The selected SIM did not establish verified Internet connectivity. The previous SIM and configuration were restored." \
++			"The selected SIM failed Internet verification and rollback could not restore verified connectivity."
++		return $?
++	fi
+ 
+ 	if [ "$request_mode" = manual-keep ] && [ "$(uci -q get simmanager.automation.enabled)" = "1" ]; then
+ 		/usr/sbin/simmanager-auto manual-activation "$target" >/dev/null 2>&1 || true
+--- original/usr/sbin/simmanager-fast-switch
++++ changed/usr/sbin/simmanager-fast-switch
+@@ -0,0 +1,131 @@
++#!/bin/sh
++
++# Experimental RM500U external-GPIO SIM switch. The vendor hard power-cycle
++# path remains the fallback for every unsupported or unproved state.
++
++target="$1"
++count="${2:-1}"
++cellular_lib="${SIMMANAGER_CELLULAR_LIB:-/lib/functions/cellular.sh}"
++gpio_root="${SIMMANAGER_GPIO_ROOT:-/sys/class}"
++at_lock="${SIMMANAGER_AT_LOCK:-/tmp/simmanager-at.lock}"
++ready_timeout="${SIMMANAGER_FAST_SWITCH_READY_TIMEOUT:-15}"
++
++case "$target" in sim1|sim2) ;; *) exit 2 ;; esac
++[ -r "$cellular_lib" ] || exit 2
++. "$cellular_lib"
++
++[ "$count" = "1" ] && option="" || option="$count"
++cell_section="cellular${option}"
++old_sim=$(uci -q get "cellular.${cell_section}.hw_sim")
++case "$old_sim" in sim1|sim2) ;; *) exit 2 ;; esac
++[ "$old_sim" != "$target" ] || exit 0
++
++idevice_model=$(uci -q get "cellular.${cell_section}.idevice_model")
++case "$idevice_model" in rm500u*) ;; *) exit 2 ;; esac
++
++configured_atdev=$(uci -q get "cellular.${cell_section}.atdev")
++[ -c "$configured_atdev" ] || exit 2
++# ttyUSB2 is shared by the vendor polling worker and SMS stack on this board.
++# ttyUSB3 is the dedicated control port proved by the live CFUN test.
++atdev=${SIMMANAGER_FAST_SWITCH_ATDEV:-/dev/ttyUSB3}
++[ -c "$atdev" ] || atdev="$configured_atdev"
++
++target_suffix=${target#sim}
++[ "$target_suffix" = 1 ] && target_suffix=""
++old_suffix=${old_sim#sim}
++[ "$old_suffix" = 1 ] && old_suffix=""
++
++target_mode=$(uci -q get "hw_info.cellular${option}.s${target_suffix}_cfun")
++target_fs=$(uci -q get "hw_info.cellular${option}.s${target_suffix}_fs")
++target_file=$(uci -q get "hw_info.cellular${option}.s${target_suffix}_file")
++target_value=$(uci -q get "hw_info.cellular${option}.s${target_suffix}_val")
++old_value=$(uci -q get "hw_info.cellular${option}.s${old_suffix}_val")
++gpio_file="$gpio_root/$target_fs/$target_file"
++
++[ "$target_mode" = gpio ] || exit 2
++[ -n "$target_fs" ] && [ -n "$target_file" ] || exit 2
++case "$target_value:$old_value" in 0:1|1:0) ;; *) exit 2 ;; esac
++[ -r "$gpio_file" ] && [ -w "$gpio_file" ] || exit 2
++current_value=$(cat "$gpio_file" 2>/dev/null)
++[ "$current_value" = "$old_value" ] || exit 2
++
++model=$(uci -q get "cellular.${cell_section}.script")
++
++valid_iccid() {
++	printf '%s\n' "$1" | grep -Eq '^[0-9]{19,20}$'
++}
++
++normalize_iccid() {
++	# Some SIMs expose the unused final BCD nibble as F.  It is padding, not
++	# part of the decimal ICCID identity.
++	printf '%s\n' "$1" | sed 's/[Ff]$//'
++}
++
++at_reply() {
++	timeout "$1" at-cmd "$atdev" "$2" 2>/dev/null | tr -d '\r'
++}
++
++hard_fallback() {
++	reason="$1"
++	logger -t simmanager-fast-switch "Fast switch could not be proved (${reason}); using the unchanged vendor hard power-cycle fallback."
++	# The vendor fallback starts a long-running modem worker.  Release and close
++	# the AT-lock descriptor first so that worker cannot inherit the lock and
++	# leave every later AT command blocked forever.
++	flock -u 9
++	exec 9>&-
++	cellular_sw "$target" "$count"
++	exit $?
++}
++
++fast_switch_locked() {
++	[ -n "$model" ] && kill_process "$model"
++
++	old_iccid_raw=$(at_reply 4 AT+CCID | sed -n 's/^+CCID:[[:space:]]*//p' | tail -n 1)
++	old_iccid=$(normalize_iccid "$old_iccid_raw")
++	valid_iccid "$old_iccid" || old_iccid=""
++
++	at_reply 18 AT+CFUN=0 >/dev/null
++	cfun_state=$(at_reply 4 AT+CFUN? | sed -n 's/^+CFUN:[[:space:]]*//p' | tail -n 1)
++	[ "$cfun_state" = 0 ] || hard_fallback "minimum-function mode was not confirmed"
++
++	uci set "cellular.${cell_section}.hw_sim=$target" || hard_fallback "target SIM could not be saved"
++	uci commit cellular || hard_fallback "target SIM configuration could not be committed"
++	sync
++
++	# This board's GPIO sysfs driver can return a write error after applying the
++	# new selector value.  The hardware read-back below is authoritative.
++	printf '%s\n' "$target_value" > "$gpio_file" 2>/dev/null || :
++	selected_value=$(cat "$gpio_file" 2>/dev/null)
++	[ "$selected_value" = "$target_value" ] || hard_fallback "SIM GPIO read-back did not match"
++	sleep 1
++
++	at_reply 18 AT+CFUN=1 >/dev/null
++
++	ready_deadline=$(( $(date +%s) + ready_timeout ))
++	new_iccid=""
++	while [ "$(date +%s)" -lt "$ready_deadline" ]; do
++		cfun_state=$(at_reply 2 'AT+CFUN?' | sed -n 's/^+CFUN:[[:space:]]*//p' | tail -n 1)
++		cpin=$(at_reply 2 'AT+CPIN?')
++		new_iccid_raw=$(at_reply 2 AT+CCID | sed -n 's/^+CCID:[[:space:]]*//p' | tail -n 1)
++		new_iccid=$(normalize_iccid "$new_iccid_raw")
++		if [ "$cfun_state" = 1 ] && printf '%s\n' "$cpin" | grep -q '^+CPIN:[[:space:]]*READY$' && valid_iccid "$new_iccid"; then
++			if [ -z "$old_iccid" ] || [ "$new_iccid" != "$old_iccid" ]; then
++				logger -t simmanager-fast-switch "Fast GPIO switch selected ${target}; SIM ${new_iccid} became ready without restarting USB."
++				# watchsystem also starts a long-running modem worker.  Never let it
++				# inherit the AT-lock descriptor.
++				flock -u 9
++				exec 9>&-
++				watchsystem
++				return 0
++			fi
++		fi
++		sleep 1
++	done
++
++	hard_fallback "the new ICCID did not become ready within ${ready_timeout} seconds"
++}
++
++(
++	flock -x 9
++	fast_switch_locked
++) 9>"$at_lock"
+--- original/usr/sbin/simmanager-sms
++++ changed/usr/sbin/simmanager-sms
+@@ -1,4 +1,6 @@
+ #!/bin/sh
+ 
+ lock=${SIMMANAGER_AT_LOCK:-/tmp/simmanager-at.lock}
+-exec flock -x "$lock" /usr/libexec/simmanager-sms "$@"
++# Auto-sync runs every ten seconds.  Skip one cycle instead of waiting forever
++# behind an activation or another modem owner; the daemon will retry normally.
++exec flock -w 5 -x "$lock" /usr/libexec/simmanager-sms "$@"

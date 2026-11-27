@@ -1,7 +1,0 @@
-726f3101205cfaecc2950cf77a6efec2c4ac011a6a5666ce55ca0268019b6309  changed/usr/lib/lua/luci/controller/simmanager.lua
-c3b7ac55963ee7a893abf4383b2dc28f091c425bb00215656322f1b9f43d2910  changed/usr/lib/lua/luci/model/cbi/simmanager/automation.lua
-f4ecd464304ae552b17094d346de7d1e38875b79122a616db021c1b1b4482672  changed/usr/lib/lua/luci/view/simmanager/automation_history.htm
-c06185e0551b10b8610594909c1e1c104804ff0e43ada29fe7a03c339514f321  changed/usr/sbin/simmanager-auto
-e63dfe3937e89e18d37ad3000917da5e355dfc6a8a55bd8ab821d04fcf105b89  original/usr/lib/lua/luci/controller/simmanager.lua
-5a24b1ca78b71c71e4b2e0b8a0b70624265bcf3b873f7435a8788611d398cf89  original/usr/lib/lua/luci/model/cbi/simmanager/automation.lua
-4f3eb9e4a73486d5e9a61e7a094db3fad029459f18149becd96a9770549ff820  original/usr/sbin/simmanager-auto

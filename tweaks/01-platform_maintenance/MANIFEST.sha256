@@ -1,0 +1,4 @@
+de8d3702dafa7db2c7f0220c0fb0e64e20c056b514f5dcf5218daedccd75b03c  ./README.md
+6d3dd2938a334cbc10f02d8b56f93558a32c08236d2005f3f384de4f9a1f4ec3  ./change.patch
+e79cee178ccc963c04f1f31ef435a1f77c525098efb2b2bff225508ba9fffd73  ./changed/etc/config/watchdog
+ca5e0f7503aacdc696743becb394a5d2076e6cc9a61e22edfc3d4c70ae1fffc8  ./changed/etc/opkg/distfeeds.conf
