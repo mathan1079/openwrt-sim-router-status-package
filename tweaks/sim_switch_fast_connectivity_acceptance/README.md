@@ -50,6 +50,9 @@ or crossed even after real Internet connectivity is available.
 | --- | --- | --- |
 | `/usr/sbin/simmanager-control` | `947c1724060913d1f9b4517f515a246a1a7387740b83040972fad624f0af6163` | `d46a0d53ef26fe9a0891dbfe18d1409941dc06ffb00c9cac54db81667bacef56` |
 
+This historical controller stage is now incorporated into
+`rm500u_cfun_gpio_fast_switch`; its connectivity-proof behavior remains active.
+
 `original/` is the exact live pre-change file, `changed/` is the reviewed
 deployment file and `change.patch` is their reproducible unified diff.
 

@@ -1,6 +1,6 @@
 # First-router tweak status
 
-Last audited: 27 November 2026, 12:18 PM IST.
+Last audited: 27 November 2026, after the first live CFUN/GPIO switch test.
 
 This is the ownership map for router-level changes. The exact current files are
 under `current_first_router/files/`.
@@ -14,8 +14,11 @@ under `current_first_router/files/`.
 | `cellular_worker_single_instance_fix` | Active/incorporated | Signal and PID-lock behavior is in the cumulative worker. |
 | `modem_command_collision_restart_fix` | Active/latest delta | Complete before/after worker files and a real unified patch are archived here. |
 | `opkg_feed_cleanup` | Active | Removes duplicate, obsolete snapshot and missing MediaTek feeds without changing installed packages. |
-| `sim_switch_fast_connectivity_acceptance` | Active/latest delta | Skips the redundant post-switch reload and accepts a new SIM after two consecutive 2-of-3 Internet proofs. |
+| `sim_switch_fast_connectivity_acceptance` | Active/incorporated | Its two-round 2-of-3 Internet proof remains in the controller; latest controller delta is `rm500u_cfun_gpio_fast_switch`. |
 | `jio_return_fast_path` | Active/latest delta | Preserves prepared Jio state per ICCID and avoids a second modem restart when returning to a known Jio SIM with live NAT/CLAT enabled. |
+| `rm500u_cfun_gpio_fast_switch` | Active R&D/incorporated | Tries a proved CFUN/GPIO switch without USB restart and automatically falls back to unchanged vendor hard power cycling. Its first live fallback exposed an inherited AT-lock descriptor, corrected by `simmanager_at_lock_inheritance_fix`. |
+| `simmanager_at_lock_inheritance_fix` | Active/latest activation safety delta | Closes the AT lock before long-running workers, bounds controller/SMS lock waits, and lets proved Internet complete activation. |
+| `rm500u_gpio_readback_acceptance_fix` | Active/latest fast-helper delta | Uses the exact post-write GPIO read-back because this board can report a sysfs write failure after applying the selector value. |
 | `celluar_crash_fix` | Active/incorporated | Atomic JSON behavior remains in the cumulative worker. Its old standalone changed worker is historical and must not be deployed over the current worker. |
 | `sim_switch_timing_fix` | Reverted/inactive | Neither archived changed file matches the router. Do not deploy without a fresh review and merge. |
 

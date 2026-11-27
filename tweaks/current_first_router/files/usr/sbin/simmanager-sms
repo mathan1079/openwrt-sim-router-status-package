@@ -1,0 +1,6 @@
+#!/bin/sh
+
+lock=${SIMMANAGER_AT_LOCK:-/tmp/simmanager-at.lock}
+# Auto-sync runs every ten seconds.  Skip one cycle instead of waiting forever
+# behind an activation or another modem owner; the daemon will retry normally.
+exec flock -w 5 -x "$lock" /usr/libexec/simmanager-sms "$@"

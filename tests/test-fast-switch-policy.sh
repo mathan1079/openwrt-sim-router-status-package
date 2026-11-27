@@ -47,4 +47,12 @@ if wait_for_stable_connectivity; then
 	fail "failed connectivity was accepted"
 fi
 
+# Once routed Internet is already proved, a busy AT port must not keep a
+# completed SIM switch in the switching state.
+activation_health_check() { return 0; }
+locked_at() { fail "AT query ran despite proved Internet connectivity"; }
+uci() { printf '/dev/null\n'; }
+wait_for_sim_ready || fail "proved Internet did not satisfy SIM readiness"
+wait_for_registration || fail "proved Internet did not satisfy registration"
+
 echo "Fast switch policy tests passed"

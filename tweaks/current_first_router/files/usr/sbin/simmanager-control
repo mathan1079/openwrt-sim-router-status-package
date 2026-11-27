@@ -22,8 +22,8 @@ activation_max_checks=${SIMMANAGER_ACTIVATION_MAX_CHECKS:-45}
 
 locked_at() {
 	(
-		flock -x 9
-		at-cmd "$@"
+		flock -w 3 -x 9 || exit 75
+		timeout 6 at-cmd "$@"
 	) 9>"$at_lock"
 }
 
@@ -178,6 +178,9 @@ wait_for_sim_ready() {
 	count=0
 	while [ "$count" -lt 30 ]; do
 		[ "$ignore_guard" = rollback ] || automation_allowed || return 1
+		# A routed 2-of-3 Internet proof is stronger evidence than a CPIN
+		# query and prevents a busy AT port from holding a completed switch.
+		activation_health_check && return 0
 		locked_at "$query_port" 'AT+CPIN?' 2>/dev/null | tr -d '\r' | grep -q '+CPIN: READY' && return 0
 		count=$((count + 1))
 		sleep 2
@@ -191,6 +194,7 @@ wait_for_registration() {
 	count=0
 	while [ "$count" -lt 45 ]; do
 		automation_allowed || return 1
+		activation_health_check && return 0
 		registration=$(locked_at "$query_port" 'AT+CEREG?' 2>/dev/null | tr -d '\r' | grep '+CEREG:' | tail -n 1)
 		registration_5g=$(locked_at "$query_port" 'AT+C5GREG?' 2>/dev/null | tr -d '\r' | grep '+C5GREG:' | tail -n 1)
 		case "$registration" in *,1|*,1,*|*,5|*,5,*) return 0 ;; esac
@@ -246,6 +250,12 @@ wait_for_stable_connectivity() {
 
 vendor_switch() {
 	target="$1"
+	if [ -x /usr/sbin/simmanager-fast-switch ]; then
+		/usr/sbin/simmanager-fast-switch "$target" 1
+		fast_status=$?
+		[ "$fast_status" = 0 ] && return 0
+		logger -t simmanager-fast-switch "Fast path is unsupported or unavailable (status ${fast_status}); using the unchanged vendor switch."
+	fi
 	. /lib/functions/cellular.sh
 	cellular_sw "$target" 1
 }

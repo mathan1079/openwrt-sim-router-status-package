@@ -1,0 +1,4 @@
+#!/bin/sh
+
+lock=${SIMMANAGER_AT_LOCK:-/tmp/simmanager-at.lock}
+exec flock -x "$lock" /usr/libexec/simmanager-sms "$@"

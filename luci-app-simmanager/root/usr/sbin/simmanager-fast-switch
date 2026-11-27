@@ -1,0 +1,121 @@
+#!/bin/sh
+
+# Experimental RM500U external-GPIO SIM switch. The vendor hard power-cycle
+# path remains the fallback for every unsupported or unproved state.
+
+target="$1"
+count="${2:-1}"
+cellular_lib="${SIMMANAGER_CELLULAR_LIB:-/lib/functions/cellular.sh}"
+gpio_root="${SIMMANAGER_GPIO_ROOT:-/sys/class}"
+at_lock="${SIMMANAGER_AT_LOCK:-/tmp/simmanager-at.lock}"
+ready_timeout="${SIMMANAGER_FAST_SWITCH_READY_TIMEOUT:-15}"
+
+case "$target" in sim1|sim2) ;; *) exit 2 ;; esac
+[ -r "$cellular_lib" ] || exit 2
+. "$cellular_lib"
+
+[ "$count" = "1" ] && option="" || option="$count"
+cell_section="cellular${option}"
+old_sim=$(uci -q get "cellular.${cell_section}.hw_sim")
+case "$old_sim" in sim1|sim2) ;; *) exit 2 ;; esac
+[ "$old_sim" != "$target" ] || exit 0
+
+idevice_model=$(uci -q get "cellular.${cell_section}.idevice_model")
+case "$idevice_model" in rm500u*) ;; *) exit 2 ;; esac
+
+atdev=$(uci -q get "cellular.${cell_section}.atdev")
+[ -c "$atdev" ] || exit 2
+
+target_suffix=${target#sim}
+[ "$target_suffix" = 1 ] && target_suffix=""
+old_suffix=${old_sim#sim}
+[ "$old_suffix" = 1 ] && old_suffix=""
+
+target_mode=$(uci -q get "hw_info.cellular${option}.s${target_suffix}_cfun")
+target_fs=$(uci -q get "hw_info.cellular${option}.s${target_suffix}_fs")
+target_file=$(uci -q get "hw_info.cellular${option}.s${target_suffix}_file")
+target_value=$(uci -q get "hw_info.cellular${option}.s${target_suffix}_val")
+old_value=$(uci -q get "hw_info.cellular${option}.s${old_suffix}_val")
+gpio_file="$gpio_root/$target_fs/$target_file"
+
+[ "$target_mode" = gpio ] || exit 2
+[ -n "$target_fs" ] && [ -n "$target_file" ] || exit 2
+case "$target_value:$old_value" in 0:1|1:0) ;; *) exit 2 ;; esac
+[ -r "$gpio_file" ] && [ -w "$gpio_file" ] || exit 2
+current_value=$(cat "$gpio_file" 2>/dev/null)
+[ "$current_value" = "$old_value" ] || exit 2
+
+model=$(uci -q get "cellular.${cell_section}.script")
+
+valid_iccid() {
+	printf '%s\n' "$1" | grep -Eq '^[0-9]{19,20}$'
+}
+
+at_reply() {
+	timeout "$1" at-cmd "$atdev" "$2" 2>/dev/null | tr -d '\r'
+}
+
+hard_fallback() {
+	reason="$1"
+	logger -t simmanager-fast-switch "Fast switch could not be proved (${reason}); using the unchanged vendor hard power-cycle fallback."
+	# The vendor fallback starts a long-running modem worker.  Release and close
+	# the AT-lock descriptor first so that worker cannot inherit the lock and
+	# leave every later AT command blocked forever.
+	flock -u 9
+	exec 9>&-
+	cellular_sw "$target" "$count"
+	exit $?
+}
+
+fast_switch_locked() {
+	[ -n "$model" ] && kill_process "$model"
+
+	old_iccid=$(at_reply 4 AT+CCID | sed -n 's/^+CCID:[[:space:]]*//p' | tail -n 1)
+	valid_iccid "$old_iccid" || old_iccid=""
+
+	cfun0=$(at_reply 18 AT+CFUN=0)
+	printf '%s\n' "$cfun0" | grep -qx OK || hard_fallback "CFUN=0 was not acknowledged"
+
+	cfun_state=$(at_reply 4 AT+CFUN? | sed -n 's/^+CFUN:[[:space:]]*//p' | tail -n 1)
+	[ "$cfun_state" = 0 ] || hard_fallback "minimum-function mode was not confirmed"
+
+	uci set "cellular.${cell_section}.hw_sim=$target" || hard_fallback "target SIM could not be saved"
+	uci commit cellular || hard_fallback "target SIM configuration could not be committed"
+	sync
+
+	# This board's GPIO sysfs driver can return a write error after applying the
+	# new selector value.  The hardware read-back below is authoritative.
+	printf '%s\n' "$target_value" > "$gpio_file" 2>/dev/null || :
+	selected_value=$(cat "$gpio_file" 2>/dev/null)
+	[ "$selected_value" = "$target_value" ] || hard_fallback "SIM GPIO read-back did not match"
+	sleep 1
+
+	cfun1=$(at_reply 18 AT+CFUN=1)
+	printf '%s\n' "$cfun1" | grep -qx OK || hard_fallback "CFUN=1 was not acknowledged"
+
+	ready_deadline=$(( $(date +%s) + ready_timeout ))
+	new_iccid=""
+	while [ "$(date +%s)" -lt "$ready_deadline" ]; do
+		cpin=$(at_reply 2 'AT+CPIN?')
+		new_iccid=$(at_reply 2 AT+CCID | sed -n 's/^+CCID:[[:space:]]*//p' | tail -n 1)
+		if printf '%s\n' "$cpin" | grep -q '^+CPIN:[[:space:]]*READY$' && valid_iccid "$new_iccid"; then
+			if [ -z "$old_iccid" ] || [ "$new_iccid" != "$old_iccid" ]; then
+				logger -t simmanager-fast-switch "Fast GPIO switch selected ${target}; SIM ${new_iccid} became ready without restarting USB."
+				# watchsystem also starts a long-running modem worker.  Never let it
+				# inherit the AT-lock descriptor.
+				flock -u 9
+				exec 9>&-
+				watchsystem
+				return 0
+			fi
+		fi
+		sleep 1
+	done
+
+	hard_fallback "the new ICCID did not become ready within ${ready_timeout} seconds"
+}
+
+(
+	flock -x 9
+	fast_switch_locked
+) 9>"$at_lock"

@@ -1,8 +1,9 @@
 # Current first-router snapshot
 
 This directory is the authoritative local snapshot of router-owned files that
-were last fully reconciled with the live first router on 27 November 2026 at
-12:19 PM IST, after deploying the Jio return fast path.
+were last fully reconciled with the live first router on 27 November 2026,
+after correcting AT-lock inheritance and GPIO write/read-back handling found
+by the first live RM500U CFUN/GPIO R&D switches.
 
 Files below `files/` preserve their absolute router paths. This snapshot is for
 comparison, recovery planning and future patch preparation. Do not deploy the
