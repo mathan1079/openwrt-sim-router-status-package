@@ -85,7 +85,7 @@ end
 
 local checks = s:option(DummyValue, "health_checks", translate("Connectivity proof"))
 checks.cfgvalue = function()
-	return translate("Three interface-bound probes run in parallel every 5 seconds. At least two must succeed. Signal strength alone never triggers a switch.")
+	return translate("Three interface-bound routed-IP probes run in parallel every 5 seconds. At least two must succeed. IPv6-only profiles use IPv6 probes; other profiles require IPv4 reachability. Signal strength alone never triggers a switch.")
 end
 
 local guard = s:option(DummyValue, "vendor_guard", translate("Vendor automatic switch"))
@@ -115,6 +115,16 @@ next_retry.cfgvalue = function()
 	local stamp = tonumber(status_data.next_retry)
 	return stamp and stamp > 0 and string.format('<span class="simmanager-local-time" data-epoch="%d"></span>', stamp) or translate("Not scheduled")
 end
+
+local next_switch = status:option(DummyValue, "runtime_switch_retry", translate("Next failover attempt"))
+next_switch.rawhtml = true
+next_switch.cfgvalue = function()
+	local stamp = tonumber(status_data.next_switch_attempt)
+	return stamp and stamp > os.time() and string.format('<span class="simmanager-local-time" data-epoch="%d"></span>', stamp) or translate("Ready")
+end
+
+local history = m:section(SimpleSection)
+history.template = "simmanager/automation_history"
 
 local local_time = m:section(SimpleSection)
 local_time.template = "simmanager/local_time"

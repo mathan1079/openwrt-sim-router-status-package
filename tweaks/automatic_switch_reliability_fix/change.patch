@@ -1,0 +1,482 @@
+diff -ruN tweaks/automatic_switch_reliability_fix/original/etc/init.d/simmanager-auto tweaks/automatic_switch_reliability_fix/changed/etc/init.d/simmanager-auto
+--- tweaks/automatic_switch_reliability_fix/original/etc/init.d/simmanager-auto	2026-11-27 13:45:41
++++ tweaks/automatic_switch_reliability_fix/changed/etc/init.d/simmanager-auto	2026-11-27 13:45:41
+@@ -15,11 +15,16 @@
+ 	procd_set_param stdout 1
+ 	procd_set_param stderr 1
+ 	procd_set_param term_timeout 10
++	# Recover from an unexpected controller exit, but stop after a sustained
++	# crash loop so a broken installation cannot consume the router forever.
++	procd_set_param respawn 3600 5 5
+ 	procd_close_instance
+ }
+ 
+ service_triggers() {
+-	procd_add_reload_trigger "simmanager" "cellular"
++	# The monitor reads cellular state every five seconds. Reloading it for every
++	# cellular change can interrupt its own guarded activation transaction.
++	procd_add_reload_trigger "simmanager"
+ }
+ 
+ reload_service() {
+diff -ruN tweaks/automatic_switch_reliability_fix/original/usr/lib/lua/luci/model/cbi/simmanager/automation.lua tweaks/automatic_switch_reliability_fix/changed/usr/lib/lua/luci/model/cbi/simmanager/automation.lua
+--- tweaks/automatic_switch_reliability_fix/original/usr/lib/lua/luci/model/cbi/simmanager/automation.lua	2026-11-27 13:45:41
++++ tweaks/automatic_switch_reliability_fix/changed/usr/lib/lua/luci/model/cbi/simmanager/automation.lua	2026-11-27 13:45:41
+@@ -85,7 +85,7 @@
+ 
+ local checks = s:option(DummyValue, "health_checks", translate("Connectivity proof"))
+ checks.cfgvalue = function()
+-	return translate("Three interface-bound probes run in parallel every 5 seconds. At least two must succeed. Signal strength alone never triggers a switch.")
++	return translate("Three interface-bound routed-IP probes run in parallel every 5 seconds. At least two must succeed. IPv6-only profiles use IPv6 probes; other profiles require IPv4 reachability. Signal strength alone never triggers a switch.")
+ end
+ 
+ local guard = s:option(DummyValue, "vendor_guard", translate("Vendor automatic switch"))
+@@ -114,6 +114,13 @@
+ next_retry.cfgvalue = function()
+ 	local stamp = tonumber(status_data.next_retry)
+ 	return stamp and stamp > 0 and string.format('<span class="simmanager-local-time" data-epoch="%d"></span>', stamp) or translate("Not scheduled")
++end
++
++local next_switch = status:option(DummyValue, "runtime_switch_retry", translate("Next failover attempt"))
++next_switch.rawhtml = true
++next_switch.cfgvalue = function()
++	local stamp = tonumber(status_data.next_switch_attempt)
++	return stamp and stamp > os.time() and string.format('<span class="simmanager-local-time" data-epoch="%d"></span>', stamp) or translate("Ready")
+ end
+ 
+ local local_time = m:section(SimpleSection)
+diff -ruN tweaks/automatic_switch_reliability_fix/original/usr/sbin/simmanager-auto tweaks/automatic_switch_reliability_fix/changed/usr/sbin/simmanager-auto
+--- tweaks/automatic_switch_reliability_fix/original/usr/sbin/simmanager-auto	2026-11-27 13:45:41
++++ tweaks/automatic_switch_reliability_fix/changed/usr/sbin/simmanager-auto	2026-11-27 13:49:22
+@@ -16,6 +16,7 @@
+ control_lock_dir=${SIMMANAGER_CONTROL_LOCK_DIR:-/tmp/simmanager-control.lock}
+ init_service=${SIMMANAGER_AUTO_INIT:-/etc/init.d/simmanager-auto}
+ probe_hosts=${SIMMANAGER_AUTO_PROBES:-"1.1.1.1 8.8.8.8 9.9.9.9"}
++probe_hosts_v6=${SIMMANAGER_AUTO_PROBES_V6:-"2606:4700:4700::1111 2001:4860:4860::8888 2620:fe::fe"}
+ monitor_interval=5
+ 
+ write_status() {
+@@ -32,6 +33,7 @@
+ 	json_add_string active_sim "${active:-unknown}"
+ 	json_add_string default_sim "${default_sim:-unknown}"
+ 	json_add_string next_retry "$next"
++	json_add_string next_switch_attempt "${next_switch_attempt:-0}"
+ 	json_add_string updated_at "$(date +%s)"
+ 	json_dump > "$status_new" && mv -f "$status_new" "$status_file"
+ 	json_cleanup
+@@ -68,6 +70,9 @@
+ 	last_switch=$(number_value "$(state_value last_switch)" 0)
+ 	switch_day=$(state_value switch_day); switch_day=${switch_day:-$(date +%Y%m%d)}
+ 	switch_count=$(number_value "$(state_value switch_count)" 0)
++	secondary_since=$(number_value "$(state_value secondary_since)" 0)
++	failed_attempts=$(number_value "$(state_value failed_attempts)" 0)
++	next_switch_attempt=$(number_value "$(state_value next_switch_attempt)" 0)
+ }
+ 
+ save_state() {
+@@ -79,6 +84,9 @@
+ 		printf 'last_switch=%s\n' "$last_switch"
+ 		printf 'switch_day=%s\n' "$switch_day"
+ 		printf 'switch_count=%s\n' "$switch_count"
++		printf 'secondary_since=%s\n' "$secondary_since"
++		printf 'failed_attempts=%s\n' "$failed_attempts"
++		printf 'next_switch_attempt=%s\n' "$next_switch_attempt"
+ 	} > "$state_new" && mv -f "$state_new" "$state_file"
+ }
+ 
+@@ -111,10 +119,20 @@
+ 
+ health_check() {
+ 	device=$(network_device) || return 1
++	active_profile=$(uci -q get cellular.cellular.hw_sim)
++	probe_pdp=$(uci -q get "simmanager.${active_profile}.pdp_type")
++	[ -n "$probe_pdp" ] || probe_pdp=$(uci -q get cellular.cellular.m_pdp)
++	probe_command=ping
++	health_hosts="$probe_hosts"
++	if [ "$probe_pdp" = IPV6 ]; then
++		command -v ping6 >/dev/null 2>&1 || return 1
++		probe_command=ping6
++		health_hosts="$probe_hosts_v6"
++	fi
+ 	success=0
+ 	pids=""
+-	for host in $probe_hosts; do
+-		ping -I "$device" -c 1 -W 2 "$host" >/dev/null 2>&1 &
++	for host in $health_hosts; do
++		"$probe_command" -I "$device" -c 1 -W 2 "$host" >/dev/null 2>&1 &
+ 		pids="$pids $!"
+ 	done
+ 	for pid in $pids; do
+@@ -177,6 +195,14 @@
+ 	now="$1"
+ 	emergency="${2:-0}"
+ 	refresh_daily_budget
++	if [ "$next_switch_attempt" -gt "$now" ]; then
++		write_status backoff "A failed automatic switch is in safety backoff before another disruptive attempt." switch_backoff "$(uci -q get cellular.cellular.hw_sim)" "$next_retry"
++		return 4
++	fi
++	if [ "$next_switch_attempt" -gt 0 ]; then
++		next_switch_attempt=0
++		save_state
++	fi
+ 	[ "$switch_count" -lt "$max_switches_per_day" ] || {
+ 		write_status limited "Daily automatic switch limit reached; waiting for manual review or the next day." daily_limit "$(uci -q get cellular.cellular.hw_sim)" "$next_retry"
+ 		return 1
+@@ -185,13 +211,13 @@
+ 		cooldown_seconds=$((cooldown_minutes * 60))
+ 		[ "$last_switch" -eq 0 ] || [ $((now - last_switch)) -ge "$cooldown_seconds" ] || {
+ 			write_status cooldown "A scheduled SIM change is waiting for the minimum switch cooldown." cooldown "$(uci -q get cellular.cellular.hw_sim)" "$next_retry"
+-			return 1
++			return 4
+ 		}
+ 	fi
+ 	return 0
+ }
+ 
+-record_successful_switch() {
++record_switch_attempt() {
+ 	now="$1"
+ 	refresh_daily_budget
+ 	last_switch="$now"
+@@ -199,12 +225,37 @@
+ 	save_state
+ }
+ 
++clear_failed_attempts() {
++	failed_attempts=0
++	next_switch_attempt=0
++	save_state
++}
++
++record_failed_attempt() {
++	now="$1"
++	failed_attempts=$((failed_attempts + 1))
++	case "$failed_attempts" in
++		1) retry_delay=30 ;;
++		2) retry_delay=60 ;;
++		3) retry_delay=120 ;;
++		*) retry_delay=300 ;;
++	esac
++	next_switch_attempt=$((now + retry_delay))
++	save_state
++}
++
+ recover_active() {
+ 	active="$1"
+ 	reason="$2"
+ 	guard_enabled || return 2
+ 	write_status recovering "Reapplying the active SIM profile once before failover." "$reason" "$active" "$next_retry"
+-	if "$control" activate "$active" automatic && verify_stable_health; then
++	"$control" activate "$active" automatic
++	recovery_status=$?
++	if [ "$recovery_status" -eq 3 ]; then
++		disable_after_rollback_failure
++		return 2
++	fi
++	if [ "$recovery_status" -eq 0 ] && verify_stable_health; then
+ 		write_status healthy "The active SIM recovered and passed three consecutive connectivity checks." recovered "$active" "$next_retry"
+ 		return 0
+ 	fi
+@@ -225,7 +276,9 @@
+ 	now=$(date +%s)
+ 	emergency=0
+ 	case "$reason" in sustained_outage|reconnect_loop|secondary_failed) emergency=1 ;; esac
+-	can_switch_now "$now" "$emergency" || return 1
++	can_switch_now "$now" "$emergency"
++	switch_permission=$?
++	[ "$switch_permission" -eq 0 ] || return "$switch_permission"
+ 	from=$(uci -q get cellular.cellular.hw_sim)
+ 	[ "$from" = sim1 ] || [ "$from" = sim2 ] || {
+ 		write_status error "Current physical SIM is unknown; automatic switching was cancelled." unknown_active "$from" "$next_retry"
+@@ -234,21 +287,30 @@
+ 	[ "$from" != "$target" ] || return 0
+ 	if [ -d "$control_lock_dir" ]; then
+ 		write_status waiting "A manual SIM operation is finishing; emergency failover will retry on the next health check." manual_operation "$from" "$next_retry"
+-		return 1
++		return 4
+ 	fi
+ 	write_status switching "Switching through the guarded backup-and-rollback controller." "$reason" "$from" "$next_retry"
+-	if ! "$control" activate "$target" automatic; then
++	record_switch_attempt "$now"
++	"$control" activate "$target" automatic
++	control_status=$?
++	if [ "$control_status" -ne 0 ]; then
++		if [ "$control_status" -eq 3 ]; then
++			disable_after_rollback_failure
++			return 2
++		fi
++		record_failed_attempt "$(date +%s)"
+ 		write_status failed "The target SIM did not activate; the guarded controller attempted rollback." activation_failed "$(uci -q get cellular.cellular.hw_sim)" "$next_retry"
+ 		return 1
+ 	fi
+ 	write_status verifying "The target SIM registered; proving Internet connectivity before accepting it." "$reason" "$target" "$next_retry"
+ 	if verify_stable_health; then
+-		record_successful_switch "$(date +%s)"
++		clear_failed_attempts
+ 		write_status healthy "The target SIM passed three consecutive interface-bound connectivity checks." switched "$target" "$next_retry"
+ 		return 0
+ 	fi
+ 	write_status rolling_back "The target SIM registered but failed Internet verification; restoring the previous SIM." connectivity_failed "$target" "$next_retry"
+ 	if "$control" rollback automatic && verify_stable_health; then
++		record_failed_attempt "$(date +%s)"
+ 		write_status rollback_complete "The previous working SIM and cellular configuration were restored." rollback_complete "$(uci -q get cellular.cellular.hw_sim)" "$next_retry"
+ 		return 1
+ 	fi
+@@ -260,20 +322,28 @@
+ 	now=$(date +%s)
+ 	mode=secondary
+ 	retry_index=0
++	secondary_since="$now"
+ 	next_retry=$((now + 21600))
+ 	save_state
+ }
+ 
+ schedule_next_primary_retry() {
+ 	now=$(date +%s)
++	[ "$secondary_since" -gt 0 ] || secondary_since="$now"
+ 	retry_index=$((retry_index + 1))
+-	case "$retry_index" in
+-		1) delay=43200 ;;
+-		2) delay=64800 ;;
+-		*) delay=86400 ;;
+-	esac
++	while :; do
++		case "$retry_index" in
++			1) retry_offset=43200 ;;
++			2) retry_offset=64800 ;;
++			3) retry_offset=86400 ;;
++			*) retry_offset=$(((retry_index - 2) * 86400)) ;;
++		esac
++		candidate_retry=$((secondary_since + retry_offset))
++		[ "$candidate_retry" -gt "$now" ] && break
++		retry_index=$((retry_index + 1))
++	done
+ 	mode=secondary
+-	next_retry=$((now + delay))
++	next_retry="$candidate_retry"
+ 	save_state
+ }
+ 
+@@ -281,6 +351,9 @@
+ 	mode=primary
+ 	retry_index=0
+ 	next_retry=0
++	secondary_since=0
++	failed_attempts=0
++	next_switch_attempt=0
+ 	save_state
+ }
+ 
+@@ -290,6 +363,8 @@
+ 	load_config
+ 	load_state
+ 	last_switch=0
++	failed_attempts=0
++	next_switch_attempt=0
+ 	if [ "$target" = "$default_sim" ]; then
+ 		set_primary_state
+ 	else
+@@ -336,15 +411,23 @@
+ 		if health_check; then
+ 			last_health=up
+ 			failure_since=0
++			# A proved healthy current path ends the failed-attempt streak. Keep the
++			# daily disruptive-attempt count, but do not make a later independent
++			# outage inherit increasingly long retry backoff.
++			if [ "$failed_attempts" -gt 0 ] || [ "$next_switch_attempt" -gt 0 ]; then
++				clear_failed_attempts
++			fi
+ 			if [ "$active" = "$default_sim" ]; then
+ 				[ "$mode" = primary ] && [ "$next_retry" -eq 0 ] || set_primary_state
+ 				write_status healthy "Default SIM is online; connectivity proof passed." online "$active" 0
+ 			elif [ "$now" -ge "$next_retry" ]; then
+ 				write_status failback_due "Testing the configured default SIM according to the 6/12/18/24-hour schedule." scheduled_retry "$active" "$next_retry"
+-				if switch_and_verify "$default_sim" scheduled_primary_retry; then
++				switch_and_verify "$default_sim" scheduled_primary_retry
++				scheduled_result=$?
++				if [ "$scheduled_result" -eq 0 ]; then
+ 					set_primary_state
+ 					reset_disconnects
+-				elif [ "$(uci -q get simmanager.automation.enabled)" = "1" ]; then
++				elif [ "$scheduled_result" -ne 4 ] && [ "$(uci -q get simmanager.automation.enabled)" = "1" ]; then
+ 					schedule_next_primary_retry
+ 				fi
+ 			else
+@@ -368,11 +451,16 @@
+ 
+ 			if [ "$trigger" -eq 1 ]; then
+ 				if [ "$active" = "$default_sim" ]; then
+-					if [ "$recover_before_failover" = "1" ] && recover_active "$active" "$reason"; then
++					recovery_result=1
++					if [ "$recover_before_failover" = "1" ]; then
++						recover_active "$active" "$reason"
++						recovery_result=$?
++					fi
++					if [ "$recover_before_failover" = "1" ] && [ "$recovery_result" -eq 0 ]; then
+ 						reset_disconnects
+ 						failure_since=0
+ 						last_health=up
+-					else
++					elif [ "$recovery_result" -ne 2 ]; then
+ 						standby=$(other_sim "$default_sim")
+ 						if switch_and_verify "$standby" "$reason"; then
+ 							set_secondary_schedule
+diff -ruN tweaks/automatic_switch_reliability_fix/original/usr/sbin/simmanager-control tweaks/automatic_switch_reliability_fix/changed/usr/sbin/simmanager-control
+--- tweaks/automatic_switch_reliability_fix/original/usr/sbin/simmanager-control	2026-11-27 13:45:41
++++ tweaks/automatic_switch_reliability_fix/changed/usr/sbin/simmanager-control	2026-11-27 13:45:41
+@@ -16,6 +16,7 @@
+ automatic_request=0
+ at_lock=${SIMMANAGER_AT_LOCK:-/tmp/simmanager-at.lock}
+ activation_probe_hosts=${SIMMANAGER_ACTIVATION_PROBES:-"1.1.1.1 8.8.8.8 9.9.9.9"}
++activation_probe_hosts_v6=${SIMMANAGER_ACTIVATION_PROBES_V6:-"2606:4700:4700::1111 2001:4860:4860::8888 2620:fe::fe"}
+ activation_monitor_interval=${SIMMANAGER_ACTIVATION_INTERVAL:-2}
+ activation_required_successes=${SIMMANAGER_ACTIVATION_SUCCESSES:-2}
+ activation_max_checks=${SIMMANAGER_ACTIVATION_MAX_CHECKS:-45}
+@@ -209,7 +210,14 @@
+ 	json=$(ubus call network.interface.cellular status 2>/dev/null) || return 1
+ 	up=$(jsonfilter -s "$json" -e '@.up' 2>/dev/null)
+ 	[ "$up" = true ] || return 1
+-	address=$(jsonfilter -s "$json" -e '@["ipv4-address"][0].address' 2>/dev/null)
++	active_profile=$(uci -q get cellular.cellular.hw_sim)
++	probe_pdp=$(uci -q get "simmanager.${active_profile}.pdp_type")
++	[ -n "$probe_pdp" ] || probe_pdp=$(uci -q get cellular.cellular.m_pdp)
++	if [ "$probe_pdp" = IPV6 ]; then
++		address=$(jsonfilter -s "$json" -e '@["ipv6-address"][0].address' 2>/dev/null)
++	else
++		address=$(jsonfilter -s "$json" -e '@["ipv4-address"][0].address' 2>/dev/null)
++	fi
+ 	[ -n "$address" ] || return 1
+ 	device=$(jsonfilter -s "$json" -e '@.l3_device' 2>/dev/null)
+ 	[ -n "$device" ] || device=$(jsonfilter -s "$json" -e '@.device' 2>/dev/null)
+@@ -219,10 +227,20 @@
+ 
+ activation_health_check() {
+ 	device=$(cellular_device) || return 1
++	active_profile=$(uci -q get cellular.cellular.hw_sim)
++	probe_pdp=$(uci -q get "simmanager.${active_profile}.pdp_type")
++	[ -n "$probe_pdp" ] || probe_pdp=$(uci -q get cellular.cellular.m_pdp)
++	probe_command=ping
++	health_hosts="$activation_probe_hosts"
++	if [ "$probe_pdp" = IPV6 ]; then
++		command -v ping6 >/dev/null 2>&1 || return 1
++		probe_command=ping6
++		health_hosts="$activation_probe_hosts_v6"
++	fi
+ 	success=0
+ 	pids=""
+-	for host in $activation_probe_hosts; do
+-		ping -I "$device" -c 1 -W 2 "$host" >/dev/null 2>&1 &
++	for host in $health_hosts; do
++		"$probe_command" -I "$device" -c 1 -W 2 "$host" >/dev/null 2>&1 &
+ 		pids="$pids $!"
+ 	done
+ 	for pid in $pids; do
+@@ -283,6 +301,22 @@
+ 	wait_for_stable_connectivity
+ }
+ 
++finish_failed_activation() {
++	target="$1"
++	backup="$2"
++	success_state="$3"
++	success_message="$4"
++	critical_message="$5"
++	if restore_backup "$backup"; then
++		write_status "$success_state" "$success_message" "$target" "$backup"
++		return 1
++	fi
++	# Exit 3 is reserved for an activation failure whose rollback also failed.
++	# The automatic controller treats this as an unsafe state and disables itself.
++	write_status critical "$critical_message" "$target" "$backup"
++	return 3
++}
++
+ set_request_mode() {
+ 	request_mode="${1:-manual}"
+ 	case "$request_mode" in
+@@ -333,40 +367,45 @@
+ 	write_status applying "Applying the saved profile to vendor-supported cellular settings." "$target" "$backup"
+ 	if ! apply_profile_config; then
+ 		write_status rolling_back "Applying the profile failed; restoring the previous configuration." "$target" "$backup"
+-		restore_backup "$backup"
+-		write_status failed "Profile application failed. Automatic rollback was attempted." "$target" "$backup"
+-		return 1
++		finish_failed_activation "$target" "$backup" failed \
++			"Profile application failed. The previous configuration was restored." \
++			"Profile application failed and rollback could not restore verified connectivity."
++		return $?
+ 	fi
+ 	if ! automation_allowed; then
+ 		write_status rolling_back "The vendor automatic controller was enabled; restoring the pre-activation configuration." "$target" "$backup"
+-		restore_backup "$backup"
+-		write_status blocked "Automatic activation stopped and rollback was attempted because the vendor controller is enabled." "$target" "$backup"
+-		return 1
++		finish_failed_activation "$target" "$backup" blocked \
++			"Automatic activation stopped and the previous configuration was restored because the vendor controller is enabled." \
++			"The vendor controller was enabled and rollback could not restore verified connectivity."
++		return $?
+ 	fi
+ 
+ 	did_switch=0
+ 	if [ "$old_sim" != "$target" ]; then
+ 		if ! automation_allowed; then
+ 			write_status rolling_back "The vendor automatic controller was enabled before SIM switching; restoring the previous configuration." "$target" "$backup"
+-			restore_backup "$backup"
+-			write_status blocked "Automatic SIM switching was cancelled because the vendor controller is enabled." "$target" "$backup"
+-			return 1
++			finish_failed_activation "$target" "$backup" blocked \
++				"Automatic SIM switching was cancelled and the previous configuration was restored because the vendor controller is enabled." \
++				"The vendor controller was enabled before switching and rollback could not restore verified connectivity."
++			return $?
+ 		fi
+ 		write_status switching "Switching the SIM through the existing vendor mechanism." "$target" "$backup"
+ 		if ! vendor_switch "$target" || ! wait_for_sim_ready; then
+ 			write_status rolling_back "SIM switch did not become ready; restoring the previous SIM and configuration." "$target" "$backup"
+-			restore_backup "$backup"
+-			write_status failed "SIM switch failed. Automatic rollback was attempted." "$target" "$backup"
+-			return 1
++			finish_failed_activation "$target" "$backup" failed \
++				"SIM switch failed. The previous SIM and configuration were restored." \
++				"SIM switch failed and rollback could not restore verified connectivity."
++			return $?
+ 		fi
+ 		did_switch=1
+ 	fi
+ 
+ 	if ! automation_allowed; then
+ 		write_status rolling_back "The vendor automatic controller was enabled; restoring the previous SIM and configuration." "$target" "$backup"
+-		restore_backup "$backup"
+-		write_status blocked "Automatic activation stopped and rollback was attempted because the vendor controller is enabled." "$target" "$backup"
+-		return 1
++		finish_failed_activation "$target" "$backup" blocked \
++			"Automatic activation stopped and the previous SIM and configuration were restored because the vendor controller is enabled." \
++			"The vendor controller was enabled and rollback could not restore verified connectivity."
++		return $?
+ 	fi
+ 	if [ "$did_switch" = 1 ]; then
+ 		write_status waiting "Waiting for the switched SIM to provide verified Internet connectivity." "$target" "$backup"
+@@ -374,16 +413,18 @@
+ 		write_status waiting "Reloading the active SIM profile and waiting for verified Internet connectivity." "$target" "$backup"
+ 		/etc/init.d/cellular reload || {
+ 			write_status rolling_back "Cellular profile reload failed; restoring the previous configuration." "$target" "$backup"
+-			restore_backup "$backup"
+-			write_status failed "The selected profile could not be reloaded. Automatic rollback was attempted." "$target" "$backup"
+-			return 1
++			finish_failed_activation "$target" "$backup" failed \
++				"The selected profile could not be reloaded. The previous configuration was restored." \
++				"The selected profile could not be reloaded and rollback could not restore verified connectivity."
++			return $?
+ 		}
+ 	fi
+ 	if ! wait_for_stable_connectivity; then
+ 		write_status rolling_back "Internet verification failed; restoring the previous SIM and configuration." "$target" "$backup"
+-		restore_backup "$backup"
+-		write_status failed "The selected SIM did not establish verified Internet connectivity. Automatic rollback was attempted." "$target" "$backup"
+-		return 1
++		finish_failed_activation "$target" "$backup" failed \
++			"The selected SIM did not establish verified Internet connectivity. The previous SIM and configuration were restored." \
++			"The selected SIM failed Internet verification and rollback could not restore verified connectivity."
++		return $?
+ 	fi
+ 
+ 	if [ "$request_mode" = manual-keep ] && [ "$(uci -q get simmanager.automation.enabled)" = "1" ]; then

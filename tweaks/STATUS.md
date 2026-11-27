@@ -21,6 +21,8 @@ under `current_first_router/files/`.
 | `rm500u_gpio_readback_acceptance_fix` | Active/latest fast-helper delta | Uses the exact post-write GPIO read-back because this board can report a sysfs write failure after applying the selector value. |
 | `rm500u_cfun_control_port_fix` | Active/latest fast-helper delta | Uses dedicated `/dev/ttyUSB3` and proves CFUN states instead of requiring firmware-omitted `OK` replies. |
 | `rm500u_iccid_padding_fix` | Active/latest fast-helper delta | Normalizes one trailing ICCID padding nibble before strict decimal validation and identity proof. |
+| `automatic_switch_reliability_fix` | Reviewed/pending deployment | Corrects absolute 6/12/18/24-hour retries, failed-attempt backoff and accounting, rollback-critical propagation, temporary deferral, service lifecycle and IPv6-only probing. The current live-router snapshot is intentionally unchanged. |
+| `automatic_switch_history` | Reviewed/pending deployment | Persists complete automatic-attempt trigger and result records across restarts, with a 10-row paginated LuCI table, protected bulk deletion, seven-day retention and a 100-completed-record cap. The current live-router snapshot is intentionally unchanged. |
 | `celluar_crash_fix` | Active/incorporated | Atomic JSON behavior remains in the cumulative worker. Its old standalone changed worker is historical and must not be deployed over the current worker. |
 | `sim_switch_timing_fix` | Reverted/inactive | Neither archived changed file matches the router. Do not deploy without a fresh review and merge. |
 

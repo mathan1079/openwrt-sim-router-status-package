@@ -12,6 +12,7 @@ export SIMMANAGER_CONTROL_LIBRARY_ONLY
 fail() { echo "Fast switch policy test failed: $*" >&2; exit 1; }
 
 cellular_device() { printf 'lan5\n'; }
+uci() { return 1; }
 ping() {
 	case "$*" in
 		*1.1.1.1*|*8.8.8.8*) return 0 ;;

@@ -33,6 +33,9 @@ next_retry=0
 last_switch=0
 switch_day=$(date +%Y%m%d)
 switch_count=0
+secondary_since=0
+failed_attempts=0
+next_switch_attempt=0
 
 before=$(date +%s)
 set_secondary_schedule
@@ -43,22 +46,22 @@ assert_delay $((next_retry - before)) 21600
 before=$(date +%s)
 schedule_next_primary_retry
 assert_eq "$retry_index" 1
-assert_delay $((next_retry - before)) 43200
+assert_eq "$((next_retry - secondary_since))" 43200
 
 before=$(date +%s)
 schedule_next_primary_retry
 assert_eq "$retry_index" 2
-assert_delay $((next_retry - before)) 64800
+assert_eq "$((next_retry - secondary_since))" 64800
 
 before=$(date +%s)
 schedule_next_primary_retry
 assert_eq "$retry_index" 3
-assert_delay $((next_retry - before)) 86400
+assert_eq "$((next_retry - secondary_since))" 86400
 
 before=$(date +%s)
 schedule_next_primary_retry
 assert_eq "$retry_index" 4
-assert_delay $((next_retry - before)) 86400
+assert_eq "$((next_retry - secondary_since))" 172800
 
 mode=secondary
 retry_index=2
@@ -66,8 +69,12 @@ next_retry=1234
 last_switch=5678
 switch_day=20261125
 switch_count=3
+secondary_since=1795590000
+failed_attempts=2
+next_switch_attempt=1795590060
 save_state
 mode=x; retry_index=0; next_retry=0; last_switch=0; switch_day=x; switch_count=0
+secondary_since=0; failed_attempts=0; next_switch_attempt=0
 load_state
 assert_eq "$mode" secondary
 assert_eq "$retry_index" 2
@@ -75,6 +82,9 @@ assert_eq "$next_retry" 1234
 assert_eq "$last_switch" 5678
 assert_eq "$switch_day" 20261125
 assert_eq "$switch_count" 3
+assert_eq "$secondary_since" 1795590000
+assert_eq "$failed_attempts" 2
+assert_eq "$next_switch_attempt" 1795590060
 
 vendor_auto=1
 ours_enabled=1
@@ -99,13 +109,32 @@ max_switches_per_day=4
 cooldown_minutes=30
 switch_count=4
 last_switch=0
+next_switch_attempt=0
 if can_switch_now "$(date +%s)"; then fail "daily switch limit was ignored"; fi
 switch_count=3
 last_switch=$(date +%s)
-if can_switch_now "$(date +%s)" 0; then fail "scheduled switch cooldown was ignored"; fi
+set +e
+can_switch_now "$(date +%s)" 0
+deferred_rc=$?
+set -e
+assert_eq "$deferred_rc" 4
 can_switch_now "$(date +%s)" 1 || fail "emergency failover was blocked by cooldown"
 last_switch=0
 can_switch_now "$(date +%s)" || fail "valid switch was blocked"
+
+failed_attempts=0
+next_switch_attempt=0
+record_failed_attempt "$(date +%s)"
+assert_eq "$failed_attempts" 1
+assert_delay $((next_switch_attempt - $(date +%s))) 30
+set +e
+can_switch_now "$(date +%s)" 1
+deferred_rc=$?
+set -e
+assert_eq "$deferred_rc" 4
+clear_failed_attempts
+assert_eq "$failed_attempts" 0
+assert_eq "$next_switch_attempt" 0
 
 network_device() { printf 'lan5\n'; }
 probe_result=all
@@ -126,5 +155,26 @@ probe_result=two
 health_check || fail "two of three successful probes were rejected"
 probe_result=one
 if health_check; then fail "one of three successful probes was accepted"; fi
+
+uci() {
+	case "$*" in
+		"-q get cellular.cellular.hw_sim") printf 'sim1\n' ;;
+		"-q get simmanager.sim1.pdp_type") printf 'IPV6\n' ;;
+		*) return 1 ;;
+	esac
+}
+ping6() {
+	case "$*" in
+		*2606:4700:4700::1111*|*2001:4860:4860::8888*) return 0 ;;
+		*) return 1 ;;
+	esac
+}
+health_check || fail "IPv6-only profile did not use the IPv6 connectivity proof"
+
+init_script="$project_dir/luci-app-simmanager/root/etc/init.d/simmanager-auto"
+grep -q 'procd_set_param respawn' "$init_script" || fail "automatic controller has no crash respawn policy"
+if grep -q 'procd_add_reload_trigger.*cellular' "$init_script"; then
+	fail "cellular changes can still interrupt the automatic controller transaction"
+fi
 
 echo "Automatic policy tests passed"

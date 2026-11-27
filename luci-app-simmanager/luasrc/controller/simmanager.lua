@@ -122,6 +122,8 @@ function index()
 	entry({"admin", "simmanager", "control_status"}, call("action_control_status")).leaf = true
 	entry({"admin", "simmanager", "activate"}, post("action_activate")).leaf = true
 	entry({"admin", "simmanager", "rollback"}, post("action_rollback")).leaf = true
+	entry({"admin", "simmanager", "auto_history"}, call("action_auto_history")).leaf = true
+	entry({"admin", "simmanager", "auto_history_delete"}, post("action_auto_history_delete")).leaf = true
 	entry({"admin", "simmanager", "sms_summary"}, call("action_sms_summary")).leaf = true
 	entry({"admin", "simmanager", "sms_list"}, call("action_sms_list")).leaf = true
 	entry({"admin", "simmanager", "sms_sync"}, post("action_sms_sync")).leaf = true
@@ -141,6 +143,8 @@ function index()
 	entry({"admin", "network", "simmanager", "control_status"}, call("action_control_status")).leaf = true
 	entry({"admin", "network", "simmanager", "activate"}, post("action_activate")).leaf = true
 	entry({"admin", "network", "simmanager", "rollback"}, post("action_rollback")).leaf = true
+	entry({"admin", "network", "simmanager", "auto_history"}, call("action_auto_history")).leaf = true
+	entry({"admin", "network", "simmanager", "auto_history_delete"}, post("action_auto_history_delete")).leaf = true
 	entry({"admin", "network", "simmanager", "sms_summary"}, call("action_sms_summary")).leaf = true
 	entry({"admin", "network", "simmanager", "sms_list"}, call("action_sms_list")).leaf = true
 	entry({"admin", "network", "simmanager", "sms_sync"}, post("action_sms_sync")).leaf = true
@@ -355,6 +359,66 @@ function action_rollback()
 
 	local rc = sys.call("/usr/sbin/simmanager-control rollback manual " .. backup_id .. " >/dev/null 2>&1 &")
 	write_json({ accepted = rc == 0, backup_id = backup_id })
+end
+
+local auto_history_root = "/etc/simmanager/auto-history"
+
+local function valid_auto_history_id(value)
+	return type(value) == "string" and value:match("^%d+%-%d+%-%d+$") ~= nil
+end
+
+function action_auto_history()
+	local fs = require "nixio.fs"
+	local records = {}
+	if fs.access(auto_history_root) then
+		for id in fs.dir(auto_history_root) do
+			if valid_auto_history_id(id) then
+				local base = auto_history_root .. "/" .. id
+				local record = read_json(base .. "/start.json")
+				if next(record) ~= nil then
+					local completion = read_json(base .. "/end.json")
+					for key, value in pairs(completion) do record[key] = value end
+					record.id = id
+					record.in_progress = next(completion) == nil
+					record.deletable = not record.in_progress
+					table.insert(records, record)
+				end
+			end
+		end
+	end
+	table.sort(records, function(left, right)
+		return (tonumber(left.started_at) or 0) > (tonumber(right.started_at) or 0)
+	end)
+	write_json({ ok = true, records = records, total = #records })
+end
+
+function action_auto_history_delete()
+	local http = require "luci.http"
+	local fs = require "nixio.fs"
+	local ids = http.formvalue("ids") or ""
+	if #ids == 0 or #ids > 8192 or not ids:match("^[%d,%-]+$") then
+		http.status(400, "Bad Request")
+		write_json({ ok = false, error = "Invalid automatic-switch history selection" })
+		return
+	end
+
+	local deleted, skipped, seen = {}, {}, {}
+	for id in ids:gmatch("[^,]+") do
+		if valid_auto_history_id(id) and not seen[id] then
+			seen[id] = true
+			local base = auto_history_root .. "/" .. id
+			if fs.access(base .. "/start.json") and fs.access(base .. "/end.json") then
+				fs.unlink(base .. "/start.json.new")
+				fs.unlink(base .. "/end.json.new")
+				fs.unlink(base .. "/start.json")
+				fs.unlink(base .. "/end.json")
+				if fs.rmdir(base) then table.insert(deleted, id) else table.insert(skipped, id) end
+			else
+				table.insert(skipped, id)
+			end
+		end
+	end
+	write_json({ ok = true, deleted = deleted, skipped = skipped })
 end
 
 local function sms_command(arguments)

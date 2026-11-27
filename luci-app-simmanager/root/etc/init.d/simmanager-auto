@@ -15,11 +15,16 @@ start_service() {
 	procd_set_param stdout 1
 	procd_set_param stderr 1
 	procd_set_param term_timeout 10
+	# Recover from an unexpected controller exit, but stop after a sustained
+	# crash loop so a broken installation cannot consume the router forever.
+	procd_set_param respawn 3600 5 5
 	procd_close_instance
 }
 
 service_triggers() {
-	procd_add_reload_trigger "simmanager" "cellular"
+	# The monitor reads cellular state every five seconds. Reloading it for every
+	# cellular change can interrupt its own guarded activation transaction.
+	procd_add_reload_trigger "simmanager"
 }
 
 reload_service() {

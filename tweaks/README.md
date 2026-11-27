@@ -37,6 +37,8 @@ newer cumulative file, or reverted.
 | [`rm500u_gpio_readback_acceptance_fix`](rm500u_gpio_readback_acceptance_fix/README.md) | Active latest fast-helper delta | RM500U fast-switch helper |
 | [`rm500u_cfun_control_port_fix`](rm500u_cfun_control_port_fix/README.md) | Active latest fast-helper delta | RM500U fast-switch helper |
 | [`rm500u_iccid_padding_fix`](rm500u_iccid_padding_fix/README.md) | Active latest fast-helper delta | RM500U fast-switch helper |
+| [`automatic_switch_reliability_fix`](automatic_switch_reliability_fix/README.md) | Reviewed locally, pending deployment | Automatic policy, guarded controller, init service and LuCI status |
+| [`automatic_switch_history`](automatic_switch_history/README.md) | Reviewed locally, pending deployment | Persistent automatic-attempt records, bounded seven-day/100-record retention and paginated LuCI history table |
 
 These files are hardware/firmware-specific to the ZBT-Z8106AX-2SIM router and its vendor OpenWrt build. Do not apply them blindly to another model or firmware revision.
 

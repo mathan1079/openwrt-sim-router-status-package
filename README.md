@@ -42,7 +42,7 @@ make verify
 make build
 ```
 
-The package is written to `dist/luci-app-simmanager_<version>-1_all.ipk`.
+The package is written to `dist/luci-app-simmanager_<version>-<release>_all.ipk`.
 
 ## Install and uninstall
 

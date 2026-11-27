@@ -77,6 +77,24 @@ assert_eq "$automatic_request" 0
 assert_eq "$requested_backup_kind" manual
 if set_request_mode invalid; then fail "invalid activation request mode was accepted"; fi
 
+written_state=""
+write_status() { written_state="$1"; }
+restore_backup() { return 0; }
+set +e
+finish_failed_activation sim2 "$automatic" failed "restored" "critical"
+rollback_rc=$?
+set -e
+assert_eq "$rollback_rc" 1
+assert_eq "$written_state" failed
+
+restore_backup() { return 1; }
+set +e
+finish_failed_activation sim2 "$automatic" failed "restored" "critical"
+rollback_rc=$?
+set -e
+assert_eq "$rollback_rc" 3
+assert_eq "$written_state" critical
+
 selected_id=$(basename "$manual_pointer")
 assert_eq "$(resolve_manual_backup "$selected_id")" "$manual_pointer"
 if resolve_manual_backup 'invalid/path' >/dev/null 2>&1; then fail "unsafe backup identifier was accepted"; fi

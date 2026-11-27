@@ -13,6 +13,7 @@ test -f "$project_dir/luci-app-simmanager/luasrc/view/simmanager/dashboard.htm"
 test -f "$project_dir/luci-app-simmanager/root/etc/config/simmanager"
 test -f "$project_dir/luci-app-simmanager/luasrc/view/simmanager/activation.htm"
 test -f "$project_dir/luci-app-simmanager/luasrc/view/simmanager/automation_style.htm"
+test -f "$project_dir/luci-app-simmanager/luasrc/view/simmanager/automation_history.htm"
 test -f "$project_dir/luci-app-simmanager/root/usr/sbin/simmanager-control"
 test -f "$project_dir/luci-app-simmanager/root/usr/sbin/simmanager-auto"
 test -f "$project_dir/luci-app-simmanager/root/etc/init.d/simmanager-auto"
@@ -45,7 +46,16 @@ fi
 
 if command -v luac >/dev/null 2>&1; then
 	luac -p "$controller" "$profiles" "$automation"
-	luac -p "$project_dir/luci-app-simmanager/root/usr/libexec/simmanager-sms" \
+fi
+
+lua_compiler=""
+if command -v luac5.1 >/dev/null 2>&1; then
+	lua_compiler=luac5.1
+elif command -v luac >/dev/null 2>&1 && luac -v 2>&1 | grep -q 'Lua 5\.1'; then
+	lua_compiler=luac
+fi
+if [ -n "$lua_compiler" ]; then
+	"$lua_compiler" -p "$project_dir/luci-app-simmanager/root/usr/libexec/simmanager-sms" \
 		"$project_dir/luci-app-simmanager/root/usr/lib/lua/simmanager/sms.lua"
 fi
 
@@ -57,7 +67,11 @@ sh -n "$project_dir/luci-app-simmanager/root/usr/sbin/simmanager-sms"
 sh -n "$project_dir/luci-app-simmanager/root/usr/sbin/simmanager-sms-daemon"
 sh -n "$project_dir/luci-app-simmanager/root/etc/init.d/simmanager-sms"
 sh "$project_dir/tests/test-auto-policy.sh"
+sh "$project_dir/tests/test-auto-switch-state-machine.sh"
 sh "$project_dir/tests/test-backup-policy.sh"
+sh "$project_dir/tests/test-fast-switch-policy.sh"
+sh "$project_dir/tests/test-fast-gpio-switch.sh"
+sh "$project_dir/tests/test-jio-state-policy.sh"
 sh "$project_dir/tests/test-sms-codec.sh"
 
 echo "Safety and syntax checks passed"
