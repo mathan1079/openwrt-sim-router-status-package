@@ -16,6 +16,7 @@ automatic_latest_file="$backup_root/automatic-latest"
 automatic_request=0
 at_lock=${SIMMANAGER_AT_LOCK:-/tmp/simmanager-at.lock}
 activation_probe_hosts=${SIMMANAGER_ACTIVATION_PROBES:-"1.1.1.1 8.8.8.8 9.9.9.9"}
+activation_probe_hosts_v6=${SIMMANAGER_ACTIVATION_PROBES_V6:-"2606:4700:4700::1111 2001:4860:4860::8888 2620:fe::fe"}
 activation_monitor_interval=${SIMMANAGER_ACTIVATION_INTERVAL:-2}
 activation_required_successes=${SIMMANAGER_ACTIVATION_SUCCESSES:-2}
 activation_max_checks=${SIMMANAGER_ACTIVATION_MAX_CHECKS:-45}
@@ -98,7 +99,7 @@ load_profile() {
 	username=$(profile_value "$target" username); username=${username:-}
 	password=$(profile_value "$target" password); password=${password:-}
 	auth_type=$(profile_value "$target" auth_type); auth_type=${auth_type:-3}
-	network_mode=$(profile_value "$target" network_mode); network_mode=${network_mode:-AUTO}
+	network_mode=$(profile_value "$target" network_mode); network_mode=${network_mode:-NR5G:LTE}
 	band_auto=$(profile_value "$target" band_auto); band_auto=${band_auto:-1}
 
 	case "$apn_auto" in 0|1) ;; *) return 1 ;; esac
@@ -110,7 +111,7 @@ load_profile() {
 	[ -z "$pin" ] || { [ "${#pin}" -ge 4 ] && [ "${#pin}" -le 8 ]; } || return 1
 	case "$auth_enabled" in 0|1) ;; *) return 1 ;; esac
 	case "$auth_type" in 0|1|2|3) ;; *) return 1 ;; esac
-	case "$network_mode" in AUTO|LTE|NR5G:LTE|NR5G) ;; *) return 1 ;; esac
+	case "$network_mode" in LTE|NR5G-SA|NR5G-NSA|NR5G|NR5G:LTE|NR5G-SA:LTE|NR5G-NSA:LTE) ;; *) return 1 ;; esac
 	[ "$band_auto" = 1 ] || return 1
 	validate_printable "$username" 128 || return 1
 	validate_printable "$password" 128 || return 1
@@ -209,7 +210,14 @@ cellular_device() {
 	json=$(ubus call network.interface.cellular status 2>/dev/null) || return 1
 	up=$(jsonfilter -s "$json" -e '@.up' 2>/dev/null)
 	[ "$up" = true ] || return 1
-	address=$(jsonfilter -s "$json" -e '@["ipv4-address"][0].address' 2>/dev/null)
+	active_profile=$(uci -q get cellular.cellular.hw_sim)
+	probe_pdp=$(uci -q get "simmanager.${active_profile}.pdp_type")
+	[ -n "$probe_pdp" ] || probe_pdp=$(uci -q get cellular.cellular.m_pdp)
+	if [ "$probe_pdp" = IPV6 ]; then
+		address=$(jsonfilter -s "$json" -e '@["ipv6-address"][0].address' 2>/dev/null)
+	else
+		address=$(jsonfilter -s "$json" -e '@["ipv4-address"][0].address' 2>/dev/null)
+	fi
 	[ -n "$address" ] || return 1
 	device=$(jsonfilter -s "$json" -e '@.l3_device' 2>/dev/null)
 	[ -n "$device" ] || device=$(jsonfilter -s "$json" -e '@.device' 2>/dev/null)
@@ -219,10 +227,20 @@ cellular_device() {
 
 activation_health_check() {
 	device=$(cellular_device) || return 1
+	active_profile=$(uci -q get cellular.cellular.hw_sim)
+	probe_pdp=$(uci -q get "simmanager.${active_profile}.pdp_type")
+	[ -n "$probe_pdp" ] || probe_pdp=$(uci -q get cellular.cellular.m_pdp)
+	probe_command=ping
+	health_hosts="$activation_probe_hosts"
+	if [ "$probe_pdp" = IPV6 ]; then
+		command -v ping6 >/dev/null 2>&1 || return 1
+		probe_command=ping6
+		health_hosts="$activation_probe_hosts_v6"
+	fi
 	success=0
 	pids=""
-	for host in $activation_probe_hosts; do
-		ping -I "$device" -c 1 -W 2 "$host" >/dev/null 2>&1 &
+	for host in $health_hosts; do
+		"$probe_command" -I "$device" -c 1 -W 2 "$host" >/dev/null 2>&1 &
 		pids="$pids $!"
 	done
 	for pid in $pids; do
@@ -283,6 +301,22 @@ restore_backup() {
 	wait_for_stable_connectivity
 }
 
+finish_failed_activation() {
+	target="$1"
+	backup="$2"
+	success_state="$3"
+	success_message="$4"
+	critical_message="$5"
+	if restore_backup "$backup"; then
+		write_status "$success_state" "$success_message" "$target" "$backup"
+		return 1
+	fi
+	# Exit 3 is reserved for an activation failure whose rollback also failed.
+	# The automatic controller treats this as an unsafe state and disables itself.
+	write_status critical "$critical_message" "$target" "$backup"
+	return 3
+}
+
 set_request_mode() {
 	request_mode="${1:-manual}"
 	case "$request_mode" in
@@ -333,40 +367,45 @@ activate_profile() {
 	write_status applying "Applying the saved profile to vendor-supported cellular settings." "$target" "$backup"
 	if ! apply_profile_config; then
 		write_status rolling_back "Applying the profile failed; restoring the previous configuration." "$target" "$backup"
-		restore_backup "$backup"
-		write_status failed "Profile application failed. Automatic rollback was attempted." "$target" "$backup"
-		return 1
+		finish_failed_activation "$target" "$backup" failed \
+			"Profile application failed. The previous configuration was restored." \
+			"Profile application failed and rollback could not restore verified connectivity."
+		return $?
 	fi
 	if ! automation_allowed; then
 		write_status rolling_back "The vendor automatic controller was enabled; restoring the pre-activation configuration." "$target" "$backup"
-		restore_backup "$backup"
-		write_status blocked "Automatic activation stopped and rollback was attempted because the vendor controller is enabled." "$target" "$backup"
-		return 1
+		finish_failed_activation "$target" "$backup" blocked \
+			"Automatic activation stopped and the previous configuration was restored because the vendor controller is enabled." \
+			"The vendor controller was enabled and rollback could not restore verified connectivity."
+		return $?
 	fi
 
 	did_switch=0
 	if [ "$old_sim" != "$target" ]; then
 		if ! automation_allowed; then
 			write_status rolling_back "The vendor automatic controller was enabled before SIM switching; restoring the previous configuration." "$target" "$backup"
-			restore_backup "$backup"
-			write_status blocked "Automatic SIM switching was cancelled because the vendor controller is enabled." "$target" "$backup"
-			return 1
+			finish_failed_activation "$target" "$backup" blocked \
+				"Automatic SIM switching was cancelled and the previous configuration was restored because the vendor controller is enabled." \
+				"The vendor controller was enabled before switching and rollback could not restore verified connectivity."
+			return $?
 		fi
 		write_status switching "Switching the SIM through the existing vendor mechanism." "$target" "$backup"
 		if ! vendor_switch "$target" || ! wait_for_sim_ready; then
 			write_status rolling_back "SIM switch did not become ready; restoring the previous SIM and configuration." "$target" "$backup"
-			restore_backup "$backup"
-			write_status failed "SIM switch failed. Automatic rollback was attempted." "$target" "$backup"
-			return 1
+			finish_failed_activation "$target" "$backup" failed \
+				"SIM switch failed. The previous SIM and configuration were restored." \
+				"SIM switch failed and rollback could not restore verified connectivity."
+			return $?
 		fi
 		did_switch=1
 	fi
 
 	if ! automation_allowed; then
 		write_status rolling_back "The vendor automatic controller was enabled; restoring the previous SIM and configuration." "$target" "$backup"
-		restore_backup "$backup"
-		write_status blocked "Automatic activation stopped and rollback was attempted because the vendor controller is enabled." "$target" "$backup"
-		return 1
+		finish_failed_activation "$target" "$backup" blocked \
+			"Automatic activation stopped and the previous SIM and configuration were restored because the vendor controller is enabled." \
+			"The vendor controller was enabled and rollback could not restore verified connectivity."
+		return $?
 	fi
 	if [ "$did_switch" = 1 ]; then
 		write_status waiting "Waiting for the switched SIM to provide verified Internet connectivity." "$target" "$backup"
@@ -374,16 +413,18 @@ activate_profile() {
 		write_status waiting "Reloading the active SIM profile and waiting for verified Internet connectivity." "$target" "$backup"
 		/etc/init.d/cellular reload || {
 			write_status rolling_back "Cellular profile reload failed; restoring the previous configuration." "$target" "$backup"
-			restore_backup "$backup"
-			write_status failed "The selected profile could not be reloaded. Automatic rollback was attempted." "$target" "$backup"
-			return 1
+			finish_failed_activation "$target" "$backup" failed \
+				"The selected profile could not be reloaded. The previous configuration was restored." \
+				"The selected profile could not be reloaded and rollback could not restore verified connectivity."
+			return $?
 		}
 	fi
 	if ! wait_for_stable_connectivity; then
 		write_status rolling_back "Internet verification failed; restoring the previous SIM and configuration." "$target" "$backup"
-		restore_backup "$backup"
-		write_status failed "The selected SIM did not establish verified Internet connectivity. Automatic rollback was attempted." "$target" "$backup"
-		return 1
+		finish_failed_activation "$target" "$backup" failed \
+			"The selected SIM did not establish verified Internet connectivity. The previous SIM and configuration were restored." \
+			"The selected SIM failed Internet verification and rollback could not restore verified connectivity."
+		return $?
 	fi
 
 	if [ "$request_mode" = manual-keep ] && [ "$(uci -q get simmanager.automation.enabled)" = "1" ]; then

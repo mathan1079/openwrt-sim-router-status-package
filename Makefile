@@ -1,6 +1,6 @@
 PACKAGE := luci-app-simmanager
 VERSION ?= 1.6.0
-RELEASE ?= 2
+RELEASE ?= 4
 ROUTER ?= mathansims-local
 SCP_FLAGS ?= -O
 IPK := dist/$(PACKAGE)_$(VERSION)-$(RELEASE)_all.ipk

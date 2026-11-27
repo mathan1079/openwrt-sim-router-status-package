@@ -99,7 +99,7 @@ load_profile() {
 	username=$(profile_value "$target" username); username=${username:-}
 	password=$(profile_value "$target" password); password=${password:-}
 	auth_type=$(profile_value "$target" auth_type); auth_type=${auth_type:-3}
-	network_mode=$(profile_value "$target" network_mode); network_mode=${network_mode:-AUTO}
+	network_mode=$(profile_value "$target" network_mode); network_mode=${network_mode:-NR5G:LTE}
 	band_auto=$(profile_value "$target" band_auto); band_auto=${band_auto:-1}
 
 	case "$apn_auto" in 0|1) ;; *) return 1 ;; esac
@@ -111,7 +111,7 @@ load_profile() {
 	[ -z "$pin" ] || { [ "${#pin}" -ge 4 ] && [ "${#pin}" -le 8 ]; } || return 1
 	case "$auth_enabled" in 0|1) ;; *) return 1 ;; esac
 	case "$auth_type" in 0|1|2|3) ;; *) return 1 ;; esac
-	case "$network_mode" in AUTO|LTE|NR5G:LTE|NR5G) ;; *) return 1 ;; esac
+	case "$network_mode" in LTE|NR5G-SA|NR5G-NSA|NR5G|NR5G:LTE|NR5G-SA:LTE|NR5G-NSA:LTE) ;; *) return 1 ;; esac
 	[ "$band_auto" = 1 ] || return 1
 	validate_printable "$username" 128 || return 1
 	validate_printable "$password" 128 || return 1

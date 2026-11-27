@@ -39,6 +39,8 @@ newer cumulative file, or reverted.
 | [`rm500u_iccid_padding_fix`](rm500u_iccid_padding_fix/README.md) | Active latest fast-helper delta | RM500U fast-switch helper |
 | [`automatic_switch_reliability_fix`](automatic_switch_reliability_fix/README.md) | Reviewed locally, pending deployment | Automatic policy, guarded controller, init service and LuCI status |
 | [`automatic_switch_history`](automatic_switch_history/README.md) | Reviewed locally, pending deployment | Persistent automatic-attempt records, bounded seven-day/100-record retention and paginated LuCI history table |
+| [`lte_nr_only_network_mode`](lte_nr_only_network_mode/README.md) | Active on first router | Existing SIM Profiles page has LTE/5G SA/5G NSA multi-select mode control; both profiles and the RM500U use `NR5G:LTE`, and Jio no longer forces AUTO |
+| [`network_mode_checkbox_state_fix`](network_mode_checkbox_state_fix/README.md) | Active on first router | Existing LTE/5G multi-select now renders stored selections as checked on OpenWrt 21.02 |
 
 These files are hardware/firmware-specific to the ZBT-Z8106AX-2SIM router and its vendor OpenWrt build. Do not apply them blindly to another model or firmware revision.
 

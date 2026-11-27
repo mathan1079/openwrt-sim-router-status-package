@@ -36,6 +36,15 @@ locked_at() {
 profile=$(uci -q get "cellular.${cell_section}.hw_sim")
 case "$profile" in sim1|sim2) ;; *) profile="" ;; esac
 
+profile_mode=""
+[ -n "$profile" ] && profile_mode=$(uci -q get "simmanager.${profile}.network_mode")
+configured_mode=$(uci -q get "cellular.${cell_section}.m_netmode")
+network_mode=${profile_mode:-$configured_mode}
+case "$network_mode" in
+	LTE|NR5G-SA|NR5G-NSA|NR5G|NR5G:LTE|NR5G-SA:LTE|NR5G-NSA:LTE) ;;
+	*) network_mode=NR5G:LTE ;;
+esac
+
 previous_signature=$(cat "$marker" 2>/dev/null)
 previous_iccid=$(printf '%s\n' "$previous_signature" | cut -d '|' -f 2)
 
@@ -91,7 +100,19 @@ if [ "$is_jio" != 1 ] && [ "$is_ipv6_only" != 1 ]; then
 	exit 0
 fi
 
-signature="v4|${iccid}|${imsi}|jionet|IPV4V6|nat1|clat1"
+current_mode=$(locked_at "$atdev" 'AT+QNWPREFCFG="mode_pref"' 2>/dev/null | tr -d '\r' | sed -n 's/^+QNWPREFCFG: "mode_pref",\(.*\)$/\1/p' | tail -n 1)
+if [ "$current_mode" != "$network_mode" ]; then
+	locked_at "$atdev" "AT+QNWPREFCFG=\"mode_pref\",${network_mode}" >/dev/null 2>&1 || exit 1
+fi
+
+uci set "cellular.${cell_section}.m_netmode=${network_mode}"
+uci commit cellular
+if [ -n "$profile" ] && [ "$(uci -q get "simmanager.${profile}")" = profile ]; then
+	uci set "simmanager.${profile}.network_mode=${network_mode}"
+	uci commit simmanager
+fi
+
+signature="v5|${iccid}|${imsi}|jionet|IPV4V6|nat1|clat1|${network_mode}"
 nat=$(locked_at "$atdev" 'AT+QCFG="nat"' 2>/dev/null | tr -d '\r' | sed -n 's/^+QCFG: "nat",\([01]\)$/\1/p' | tail -n 1)
 clat=$(locked_at "$atdev" 'AT+QCFG="clat"' 2>/dev/null | tr -d '\r' | sed -n 's/^+QCFG: "clat",\([01]\).*$/\1/p' | tail -n 1)
 
@@ -117,14 +138,14 @@ fi
 uci set "cellular.${cell_section}.m_apn_auto=0"
 uci set "cellular.${cell_section}.m_apn=jionet"
 uci set "cellular.${cell_section}.m_pdp=IPV4V6"
-uci set "cellular.${cell_section}.m_netmode=AUTO"
+uci set "cellular.${cell_section}.m_netmode=${network_mode}"
 uci commit cellular
 
 if [ -n "$profile" ] && [ "$(uci -q get "simmanager.${profile}")" = profile ]; then
 	uci set "simmanager.${profile}.apn_auto=0"
 	uci set "simmanager.${profile}.apn=jionet"
 	uci set "simmanager.${profile}.pdp_type=IPV4V6"
-	uci set "simmanager.${profile}.network_mode=AUTO"
+	uci set "simmanager.${profile}.network_mode=${network_mode}"
 	uci commit simmanager
 fi
 sync
@@ -133,7 +154,7 @@ locked_at "$atdev" 'AT+QNETDEVCTL=1,3,0' >/dev/null 2>&1
 locked_at "$atdev" 'AT+QCFG="CLAT",1,1,"",0,"ipv4only.arpa.",0,0,1,1,2,2' >/dev/null 2>&1 || exit 1
 locked_at "$atdev" 'AT+QCFG="nat",1' >/dev/null 2>&1 || exit 1
 locked_at "$atdev" 'AT+CGDCONT=1,"IPV4V6","jionet"' >/dev/null 2>&1 || exit 1
-locked_at "$atdev" 'AT+QNWPREFCFG="mode_pref",AUTO' >/dev/null 2>&1 || exit 1
+locked_at "$atdev" "AT+QNWPREFCFG=\"mode_pref\",${network_mode}" >/dev/null 2>&1 || exit 1
 printf '%s\n' "$signature" > "$marker"
 sync
 logger -t simmanager-jio "Prepared ${profile:-active SIM} for IPv6-only service using RM500U CLAT and NAT."

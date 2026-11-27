@@ -46,12 +46,59 @@ local function add_profile(section_name, title)
 	auth.default = "3"
 	auth:depends("auth_enabled", "1")
 
-	local mode = section:option(ListValue, "network_mode", translate("Preferred network mode"))
-	mode:value("AUTO", translate("Automatic"))
-	mode:value("LTE", translate("LTE only"))
-	mode:value("NR5G:LTE", translate("5G NSA only"))
-	mode:value("NR5G", translate("5G SA only"))
-	mode.default = "AUTO"
+	local mode = section:option(MultiValue, "network_mode", translate("Preferred network mode"),
+		translate("Select one or more radio technologies. For normal Jio and Airtel use, keep 4G LTE, 5G SA and 5G NSA selected."))
+	mode.widget = "checkbox"
+	mode.delimiter = ":"
+	mode:value("LTE", translate("4G LTE"))
+	mode:value("NR5G-SA", translate("5G SA"))
+	mode:value("NR5G-NSA", translate("5G NSA"))
+	-- LuCI's cbi/mvalue template uses whitespace to deserialize selected values
+	-- for rendering, while the submitted/stored modem value uses ':' below.
+	mode.default = "LTE NR5G-SA NR5G-NSA"
+	mode.rmempty = false
+
+	function mode.cfgvalue(self, section_id)
+		local value = self.map:get(section_id, self.option) or "NR5G:LTE"
+		if value == "AUTO" or value == "NR5G:LTE" then
+			return "LTE NR5G-SA NR5G-NSA"
+		elseif value == "NR5G" then
+			return "NR5G-SA NR5G-NSA"
+		end
+		return value:gsub(":", " ")
+	end
+
+	function mode.validate(self, value)
+		local selected = MultiValue.validate(self, value)
+		if not selected or selected == "" then
+			return nil, translate("Select at least one network mode.")
+		end
+		return selected
+	end
+
+	function mode.write(self, section_id, value)
+		local padded = ":" .. value .. ":"
+		local has_lte = padded:find(":LTE:", 1, true) ~= nil
+		local has_sa = padded:find(":NR5G-SA:", 1, true) ~= nil
+		local has_nsa = padded:find(":NR5G-NSA:", 1, true) ~= nil
+		local modem_value
+		if has_lte and has_sa and has_nsa then
+			modem_value = "NR5G:LTE"
+		elseif has_lte and has_sa then
+			modem_value = "NR5G-SA:LTE"
+		elseif has_lte and has_nsa then
+			modem_value = "NR5G-NSA:LTE"
+		elseif has_sa and has_nsa then
+			modem_value = "NR5G"
+		elseif has_lte then
+			modem_value = "LTE"
+		elseif has_sa then
+			modem_value = "NR5G-SA"
+		else
+			modem_value = "NR5G-NSA"
+		end
+		self.map:set(section_id, self.option, modem_value)
+	end
 
 	local band_auto = section:option(Flag, "band_auto", translate("Automatic band selection"))
 	band_auto.default = band_auto.enabled

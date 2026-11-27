@@ -23,6 +23,8 @@ under `current_first_router/files/`.
 | `rm500u_iccid_padding_fix` | Active/latest fast-helper delta | Normalizes one trailing ICCID padding nibble before strict decimal validation and identity proof. |
 | `automatic_switch_reliability_fix` | Reviewed/pending deployment | Corrects absolute 6/12/18/24-hour retries, failed-attempt backoff and accounting, rollback-critical propagation, temporary deferral, service lifecycle and IPv6-only probing. The current live-router snapshot is intentionally unchanged. |
 | `automatic_switch_history` | Reviewed/pending deployment | Persists complete automatic-attempt trigger and result records across restarts, with a 10-row paginated LuCI table, protected bulk deletion, seven-day retention and a 100-completed-record cap. The current live-router snapshot is intentionally unchanged. |
+| `lte_nr_only_network_mode` | Active/deployed | Existing profile mode row now supports LTE/5G SA/5G NSA multi-select choices. SIM1, SIM2, vendor UCI and the live RM500U are confirmed on `NR5G:LTE`; Jio remains SA n78 with IPv4/IPv6 healthy and no `br-lan` interruption. |
+| `network_mode_checkbox_state_fix` | Active/deployed | Release `1.6.0-4` corrects LuCI 21.02 MultiValue rendering. Both profiles render LTE, 5G SA and 5G NSA as selected while storage and the live modem remain `NR5G:LTE`. |
 | `celluar_crash_fix` | Active/incorporated | Atomic JSON behavior remains in the cumulative worker. Its old standalone changed worker is historical and must not be deployed over the current worker. |
 | `sim_switch_timing_fix` | Reverted/inactive | Neither archived changed file matches the router. Do not deploy without a fresh review and merge. |
 

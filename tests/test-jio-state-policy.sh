@@ -19,8 +19,11 @@ cat > "$mockbin/uci" <<'EOF'
 #!/bin/sh
 case "$*" in
   *"cellular.cellular.hw_sim") echo "${MOCK_SIM:-sim1}" ;;
+  *"cellular.cellular.m_netmode") echo "${MOCK_PROFILE_MODE:-NR5G:LTE}" ;;
   *"simmanager.sim1") echo profile ;;
   *"simmanager.sim2") echo profile ;;
+  *"simmanager.sim1.network_mode") echo "${MOCK_PROFILE_MODE:-NR5G:LTE}" ;;
+  *"simmanager.sim2.network_mode") echo "${MOCK_PROFILE_MODE:-NR5G:LTE}" ;;
 esac
 exit 0
 EOF
@@ -42,6 +45,7 @@ case "$command" in
     ;;
   'AT+QCFG="nat"') echo "+QCFG: \"nat\",${MOCK_NAT:-1}" ;;
   'AT+QCFG="clat"') echo "+QCFG: \"clat\",${MOCK_CLAT:-1}" ;;
+  'AT+QNWPREFCFG="mode_pref"') echo "+QNWPREFCFG: \"mode_pref\",${MOCK_CURRENT_MODE:-AUTO}" ;;
 esac
 exit 0
 EOF
@@ -74,7 +78,9 @@ printf '%s|100\n' "$jio_iccid" > "$state_dir/xlat-cellular.restart"
 : > "$MOCK_AT_LOG"
 MOCK_CARRIER=jio MOCK_NAT=1 MOCK_CLAT=1 sh "$helper" /dev/null cellular "$jio_iccid"
 [ -f "$per_jio_marker" ] || { echo "FAIL: shared Jio state was not migrated per ICCID"; exit 1; }
-grep -q "^v4|${jio_iccid}|" "$per_jio_marker" || { echo "FAIL: migrated marker was not upgraded"; exit 1; }
+grep -q "^v5|${jio_iccid}|.*|NR5G:LTE$" "$per_jio_marker" || { echo "FAIL: migrated marker was not upgraded with the selected network mode"; exit 1; }
+grep -q 'AT+QNWPREFCFG="mode_pref",NR5G:LTE' "$MOCK_AT_LOG" || { echo "FAIL: Jio preparation did not apply the selected LTE/5G mode"; exit 1; }
+! grep -q 'AT+QNWPREFCFG="mode_pref",AUTO' "$MOCK_AT_LOG" || { echo "FAIL: Jio preparation forced AUTO mode"; exit 1; }
 ! grep -q 'AT+CFUN=1,1' "$MOCK_AT_LOG" || { echo "FAIL: prepared Jio SIM was restarted during migration"; exit 1; }
 
 : > "$MOCK_AT_LOG"

@@ -1,0 +1,213 @@
+diff -ruN tweaks/lte_nr_only_network_mode/original/etc/config/cellular tweaks/lte_nr_only_network_mode/changed/etc/config/cellular
+--- tweaks/lte_nr_only_network_mode/original/etc/config/cellular	2026-11-27 15:32:29
++++ tweaks/lte_nr_only_network_mode/changed/etc/config/cellular	2026-11-27 15:32:29
+@@ -10,7 +10,6 @@
+ 	option idevice_model 'rm500u_ea'
+ 	option m_band_auto '1'
+ 	option m_xlat '1'
+-	option m_netmode 'AUTO'
+ 	option m_pdp 'IPV4V6'
+ 	option m_context '0'
+ 	option m_auth '3'
+@@ -24,6 +23,7 @@
+ 	option m_apn_auto '0'
+ 	option m_apn 'jionet'
+ 	option hw_sim 'sim1'
++	option m_netmode 'NR5G:LTE'
+ 
+ config cellular 'cellular2'
+ 	option m_apn_auto '0'
+diff -ruN tweaks/lte_nr_only_network_mode/original/etc/config/simmanager tweaks/lte_nr_only_network_mode/changed/etc/config/simmanager
+--- tweaks/lte_nr_only_network_mode/original/etc/config/simmanager	2026-11-27 15:32:29
++++ tweaks/lte_nr_only_network_mode/changed/etc/config/simmanager	2026-11-27 15:32:29
+@@ -4,24 +4,22 @@
+ 	option phone_number '917277556655'
+ 	option last_iccid '89918690400895597114'
+ 	option last_pci '6'
+-	option apn_auto '0'
+ 	option apn 'jionet'
+-	option network_mode 'AUTO'
+ 	option last_band 'NR N78'
+ 	option last_cell_id '106670001'
+ 	option last_operator 'Jio True5G'
+ 	option pdp_type 'IPV4V6'
+ 	option last_apn 'jionet'
+ 	option last_mccmnc '405|86'
+-	option last_network_type '11'
+ 	option last_rsrp '-75'
+-	option last_signature '89918690400895597114|Jio True5G|jionet|11|NR N78'
+-	option last_seen '1795772617'
++	option network_mode 'NR5G:LTE'
++	option last_signature '89918690400895597114|Jio True5G|jionet|+QINISTAT: 7|'
++	option last_seen '1795773611'
++	option last_network_type '+QINISTAT: 7'
+ 
+ config profile 'sim2'
+ 	option name 'SIM 2'
+ 	option pdp_type 'IPV4V6'
+-	option network_mode 'AUTO'
+ 	option apn_auto '1'
+ 	option last_cell_id 'BAE6814'
+ 	option last_pci '396'
+@@ -37,6 +35,7 @@
+ 	option last_network_type '13'
+ 	option last_signature '8991000923788177231F|airtel|airtelgprs.com.mnc094.mcc404.gprs|13|LTE BAND 3 NR N'
+ 	option last_seen '1795766091'
++	option network_mode 'NR5G:LTE'
+ 
+ config automation 'automation'
+ 	option default_sim 'sim1'
+diff -ruN tweaks/lte_nr_only_network_mode/original/usr/lib/lua/luci/model/cbi/simmanager/profiles.lua tweaks/lte_nr_only_network_mode/changed/usr/lib/lua/luci/model/cbi/simmanager/profiles.lua
+--- tweaks/lte_nr_only_network_mode/original/usr/lib/lua/luci/model/cbi/simmanager/profiles.lua	2026-11-27 15:32:29
++++ tweaks/lte_nr_only_network_mode/changed/usr/lib/lua/luci/model/cbi/simmanager/profiles.lua	2026-11-27 15:32:29
+@@ -46,12 +46,57 @@
+ 	auth.default = "3"
+ 	auth:depends("auth_enabled", "1")
+ 
+-	local mode = section:option(ListValue, "network_mode", translate("Preferred network mode"))
+-	mode:value("AUTO", translate("Automatic"))
+-	mode:value("LTE", translate("LTE only"))
+-	mode:value("NR5G:LTE", translate("5G NSA only"))
+-	mode:value("NR5G", translate("5G SA only"))
+-	mode.default = "AUTO"
++	local mode = section:option(MultiValue, "network_mode", translate("Preferred network mode"),
++		translate("Select one or more radio technologies. For normal Jio and Airtel use, keep 4G LTE, 5G SA and 5G NSA selected."))
++	mode.widget = "checkbox"
++	mode.delimiter = ":"
++	mode:value("LTE", translate("4G LTE"))
++	mode:value("NR5G-SA", translate("5G SA"))
++	mode:value("NR5G-NSA", translate("5G NSA"))
++	mode.default = "LTE:NR5G-SA:NR5G-NSA"
++	mode.rmempty = false
++
++	function mode.cfgvalue(self, section_id)
++		local value = self.map:get(section_id, self.option) or "NR5G:LTE"
++		if value == "AUTO" or value == "NR5G:LTE" then
++			return "LTE:NR5G-SA:NR5G-NSA"
++		elseif value == "NR5G" then
++			return "NR5G-SA:NR5G-NSA"
++		end
++		return value
++	end
++
++	function mode.validate(self, value)
++		local selected = MultiValue.validate(self, value)
++		if not selected or selected == "" then
++			return nil, translate("Select at least one network mode.")
++		end
++		return selected
++	end
++
++	function mode.write(self, section_id, value)
++		local padded = ":" .. value .. ":"
++		local has_lte = padded:find(":LTE:", 1, true) ~= nil
++		local has_sa = padded:find(":NR5G-SA:", 1, true) ~= nil
++		local has_nsa = padded:find(":NR5G-NSA:", 1, true) ~= nil
++		local modem_value
++		if has_lte and has_sa and has_nsa then
++			modem_value = "NR5G:LTE"
++		elseif has_lte and has_sa then
++			modem_value = "NR5G-SA:LTE"
++		elseif has_lte and has_nsa then
++			modem_value = "NR5G-NSA:LTE"
++		elseif has_sa and has_nsa then
++			modem_value = "NR5G"
++		elseif has_lte then
++			modem_value = "LTE"
++		elseif has_sa then
++			modem_value = "NR5G-SA"
++		else
++			modem_value = "NR5G-NSA"
++		end
++		self.map:set(section_id, self.option, modem_value)
++	end
+ 
+ 	local band_auto = section:option(Flag, "band_auto", translate("Automatic band selection"))
+ 	band_auto.default = band_auto.enabled
+diff -ruN tweaks/lte_nr_only_network_mode/original/usr/sbin/simmanager-control tweaks/lte_nr_only_network_mode/changed/usr/sbin/simmanager-control
+--- tweaks/lte_nr_only_network_mode/original/usr/sbin/simmanager-control	2026-11-27 15:32:29
++++ tweaks/lte_nr_only_network_mode/changed/usr/sbin/simmanager-control	2026-11-27 15:32:29
+@@ -99,7 +99,7 @@
+ 	username=$(profile_value "$target" username); username=${username:-}
+ 	password=$(profile_value "$target" password); password=${password:-}
+ 	auth_type=$(profile_value "$target" auth_type); auth_type=${auth_type:-3}
+-	network_mode=$(profile_value "$target" network_mode); network_mode=${network_mode:-AUTO}
++	network_mode=$(profile_value "$target" network_mode); network_mode=${network_mode:-NR5G:LTE}
+ 	band_auto=$(profile_value "$target" band_auto); band_auto=${band_auto:-1}
+ 
+ 	case "$apn_auto" in 0|1) ;; *) return 1 ;; esac
+@@ -111,7 +111,7 @@
+ 	[ -z "$pin" ] || { [ "${#pin}" -ge 4 ] && [ "${#pin}" -le 8 ]; } || return 1
+ 	case "$auth_enabled" in 0|1) ;; *) return 1 ;; esac
+ 	case "$auth_type" in 0|1|2|3) ;; *) return 1 ;; esac
+-	case "$network_mode" in AUTO|LTE|NR5G:LTE|NR5G) ;; *) return 1 ;; esac
++	case "$network_mode" in LTE|NR5G-SA|NR5G-NSA|NR5G|NR5G:LTE|NR5G-SA:LTE|NR5G-NSA:LTE) ;; *) return 1 ;; esac
+ 	[ "$band_auto" = 1 ] || return 1
+ 	validate_printable "$username" 128 || return 1
+ 	validate_printable "$password" 128 || return 1
+diff -ruN tweaks/lte_nr_only_network_mode/original/usr/sbin/simmanager-jio-ensure tweaks/lte_nr_only_network_mode/changed/usr/sbin/simmanager-jio-ensure
+--- tweaks/lte_nr_only_network_mode/original/usr/sbin/simmanager-jio-ensure	2026-11-27 15:32:29
++++ tweaks/lte_nr_only_network_mode/changed/usr/sbin/simmanager-jio-ensure	2026-11-27 15:32:29
+@@ -36,6 +36,15 @@
+ profile=$(uci -q get "cellular.${cell_section}.hw_sim")
+ case "$profile" in sim1|sim2) ;; *) profile="" ;; esac
+ 
++profile_mode=""
++[ -n "$profile" ] && profile_mode=$(uci -q get "simmanager.${profile}.network_mode")
++configured_mode=$(uci -q get "cellular.${cell_section}.m_netmode")
++network_mode=${profile_mode:-$configured_mode}
++case "$network_mode" in
++	LTE|NR5G-SA|NR5G-NSA|NR5G|NR5G:LTE|NR5G-SA:LTE|NR5G-NSA:LTE) ;;
++	*) network_mode=NR5G:LTE ;;
++esac
++
+ previous_signature=$(cat "$marker" 2>/dev/null)
+ previous_iccid=$(printf '%s\n' "$previous_signature" | cut -d '|' -f 2)
+ 
+@@ -91,7 +100,19 @@
+ 	exit 0
+ fi
+ 
+-signature="v4|${iccid}|${imsi}|jionet|IPV4V6|nat1|clat1"
++current_mode=$(locked_at "$atdev" 'AT+QNWPREFCFG="mode_pref"' 2>/dev/null | tr -d '\r' | sed -n 's/^+QNWPREFCFG: "mode_pref",\(.*\)$/\1/p' | tail -n 1)
++if [ "$current_mode" != "$network_mode" ]; then
++	locked_at "$atdev" "AT+QNWPREFCFG=\"mode_pref\",${network_mode}" >/dev/null 2>&1 || exit 1
++fi
++
++uci set "cellular.${cell_section}.m_netmode=${network_mode}"
++uci commit cellular
++if [ -n "$profile" ] && [ "$(uci -q get "simmanager.${profile}")" = profile ]; then
++	uci set "simmanager.${profile}.network_mode=${network_mode}"
++	uci commit simmanager
++fi
++
++signature="v5|${iccid}|${imsi}|jionet|IPV4V6|nat1|clat1|${network_mode}"
+ nat=$(locked_at "$atdev" 'AT+QCFG="nat"' 2>/dev/null | tr -d '\r' | sed -n 's/^+QCFG: "nat",\([01]\)$/\1/p' | tail -n 1)
+ clat=$(locked_at "$atdev" 'AT+QCFG="clat"' 2>/dev/null | tr -d '\r' | sed -n 's/^+QCFG: "clat",\([01]\).*$/\1/p' | tail -n 1)
+ 
+@@ -117,14 +138,14 @@
+ uci set "cellular.${cell_section}.m_apn_auto=0"
+ uci set "cellular.${cell_section}.m_apn=jionet"
+ uci set "cellular.${cell_section}.m_pdp=IPV4V6"
+-uci set "cellular.${cell_section}.m_netmode=AUTO"
++uci set "cellular.${cell_section}.m_netmode=${network_mode}"
+ uci commit cellular
+ 
+ if [ -n "$profile" ] && [ "$(uci -q get "simmanager.${profile}")" = profile ]; then
+ 	uci set "simmanager.${profile}.apn_auto=0"
+ 	uci set "simmanager.${profile}.apn=jionet"
+ 	uci set "simmanager.${profile}.pdp_type=IPV4V6"
+-	uci set "simmanager.${profile}.network_mode=AUTO"
++	uci set "simmanager.${profile}.network_mode=${network_mode}"
+ 	uci commit simmanager
+ fi
+ sync
+@@ -133,7 +154,7 @@
+ locked_at "$atdev" 'AT+QCFG="CLAT",1,1,"",0,"ipv4only.arpa.",0,0,1,1,2,2' >/dev/null 2>&1 || exit 1
+ locked_at "$atdev" 'AT+QCFG="nat",1' >/dev/null 2>&1 || exit 1
+ locked_at "$atdev" 'AT+CGDCONT=1,"IPV4V6","jionet"' >/dev/null 2>&1 || exit 1
+-locked_at "$atdev" 'AT+QNWPREFCFG="mode_pref",AUTO' >/dev/null 2>&1 || exit 1
++locked_at "$atdev" "AT+QNWPREFCFG=\"mode_pref\",${network_mode}" >/dev/null 2>&1 || exit 1
+ printf '%s\n' "$signature" > "$marker"
+ sync
+ logger -t simmanager-jio "Prepared ${profile:-active SIM} for IPv6-only service using RM500U CLAT and NAT."

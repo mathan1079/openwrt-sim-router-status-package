@@ -41,6 +41,24 @@ if [ -z "${IPKG_INSTROOT:-}" ]; then
 		uci set simmanager.automation.max_switches_per_day=4
 		uci commit simmanager
 	fi
+	mode_changed=0
+	for profile in sim1 sim2; do
+		profile_mode=$(uci -q get "simmanager.${profile}.network_mode")
+		case "$profile_mode" in
+			''|AUTO)
+				uci set "simmanager.${profile}.network_mode=NR5G:LTE"
+				mode_changed=1
+				;;
+		esac
+	done
+	cellular_mode=$(uci -q get cellular.cellular.m_netmode)
+	case "$cellular_mode" in
+		''|AUTO)
+			uci set cellular.cellular.m_netmode=NR5G:LTE
+			uci commit cellular
+			;;
+	esac
+	[ "$mode_changed" = 0 ] || uci commit simmanager
 	backup_root=/etc/simmanager/backups
 	if [ ! -s "$backup_root/manual-history" ] && [ -s "$backup_root/latest" ]; then
 		legacy_backup=$(sed -n '1p' "$backup_root/latest")
