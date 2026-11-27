@@ -1,0 +1,87 @@
+--- original/usr/sbin/simmanager-jio-ensure
++++ changed/usr/sbin/simmanager-jio-ensure
+@@ -2,7 +2,7 @@
+ 
+ # Idempotently prepare Quectel RM500U data service for Jio and other
+ # IPv6-only mobile networks that require the modem's built-in 464XLAT.
+-# Persistent ICCID state and strict reply validation prevent reset loops.
++# Persistent per-ICCID state and strict reply validation prevent reset loops.
+ 
+ atdev="$1"
+ cell_section="${2:-cellular}"
+@@ -15,8 +15,11 @@
+ }
+ 
+ state_dir="${SIMMANAGER_STATE_DIR:-/etc/simmanager/state}"
+-marker="$state_dir/xlat-${cell_section}.state"
+-restart_state="$state_dir/xlat-${cell_section}.restart"
++state_prefix="$state_dir/xlat-${cell_section}"
++marker="$state_prefix-${iccid}.state"
++restart_state="$state_prefix-${iccid}.restart"
++shared_marker="$state_prefix.state"
++shared_restart_state="$state_prefix.restart"
+ legacy_marker="/tmp/simmanager-xlat-${cell_section}.state"
+ at_lock="${SIMMANAGER_AT_LOCK:-/tmp/simmanager-at.lock}"
+ restart_cooldown="${SIMMANAGER_JIO_RESTART_COOLDOWN:-900}"
+@@ -36,6 +39,24 @@
+ previous_signature=$(cat "$marker" 2>/dev/null)
+ previous_iccid=$(printf '%s\n' "$previous_signature" | cut -d '|' -f 2)
+ 
++# Migrate the current shared persistent marker to an ICCID-specific marker.
++# A marker belonging to another SIM is retained and never invalidates this SIM.
++if [ -z "$previous_signature" ] && [ -f "$shared_marker" ]; then
++	shared_signature=$(cat "$shared_marker" 2>/dev/null)
++	shared_iccid=$(printf '%s\n' "$shared_signature" | cut -d '|' -f 2)
++	if [ "$shared_iccid" = "$iccid" ]; then
++		previous_signature="$shared_signature"
++		previous_iccid="$shared_iccid"
++		printf '%s\n' "$shared_signature" > "$marker"
++		if [ -f "$shared_restart_state" ]; then
++			shared_restart_iccid=$(cut -d '|' -f 1 "$shared_restart_state" 2>/dev/null)
++			[ "$shared_restart_iccid" = "$iccid" ] && cp -p "$shared_restart_state" "$restart_state"
++		fi
++		sync
++		logger -t simmanager-jio "Migrated the prepared Jio ICCID marker to per-SIM persistent storage."
++	fi
++fi
++
+ # Migrate the former volatile marker without forcing another modem restart.
+ if [ -z "$previous_signature" ] && [ -f "$legacy_marker" ]; then
+ 	legacy_signature=$(cat "$legacy_marker" 2>/dev/null)
+@@ -45,17 +66,10 @@
+ 		previous_iccid="$legacy_iccid"
+ 		printf '%s\n' "$legacy_signature" > "$marker"
+ 		sync
+-		logger -t simmanager-jio "Migrated the prepared Jio ICCID marker to persistent storage."
++		logger -t simmanager-jio "Migrated the prepared Jio ICCID marker to per-SIM persistent storage."
+ 	fi
+ fi
+ 
+-# Only a different validated ICCID may discard state belonging to a prior SIM.
+-if [ -n "$previous_iccid" ] && [ "$previous_iccid" != "$iccid" ]; then
+-	rm -f "$marker" "$restart_state"
+-	previous_signature=""
+-	previous_iccid=""
+-fi
+-
+ imsi=$(locked_at "$atdev" AT+CIMI 2>/dev/null | tr -d '\r' | grep -E '^[0-9]{14,16}$' | head -n 1)
+ operator=$(locked_at "$atdev" 'AT+COPS?' 2>/dev/null | tr -d '\r' | grep -E '^\+COPS:' | tail -n 1)
+ pdp_address=$(locked_at "$atdev" 'AT+CGPADDR=1' 2>/dev/null | tr -d '\r' | grep -E '^\+CGPADDR:' | tail -n 1)
+@@ -77,7 +91,7 @@
+ 	exit 0
+ fi
+ 
+-signature="v3|${iccid}|${imsi}|jionet|IPV4V6|nat1|clat1"
++signature="v4|${iccid}|${imsi}|jionet|IPV4V6|nat1|clat1"
+ nat=$(locked_at "$atdev" 'AT+QCFG="nat"' 2>/dev/null | tr -d '\r' | sed -n 's/^+QCFG: "nat",\([01]\)$/\1/p' | tail -n 1)
+ clat=$(locked_at "$atdev" 'AT+QCFG="clat"' 2>/dev/null | tr -d '\r' | sed -n 's/^+QCFG: "clat",\([01]\).*$/\1/p' | tail -n 1)
+ 
+@@ -141,7 +155,7 @@
+ 
+ 	printf '%s|%s\n' "$iccid" "$now" > "$restart_state"
+ 	sync
+-	logger -t simmanager-jio "Restarting the RM500U once after a confirmed new Jio ICCID or disabled CLAT/NAT state."
++	logger -t simmanager-jio "Restarting the RM500U once after a first-time Jio ICCID or confirmed disabled CLAT/NAT state."
+ 	locked_at "$atdev" 'AT+CFUN=1,1' >/dev/null 2>&1
+ 	exit 10
+ fi

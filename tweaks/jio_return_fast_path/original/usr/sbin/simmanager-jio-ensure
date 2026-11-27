@@ -1,0 +1,149 @@
+#!/bin/sh
+
+# Idempotently prepare Quectel RM500U data service for Jio and other
+# IPv6-only mobile networks that require the modem's built-in 464XLAT.
+# Persistent ICCID state and strict reply validation prevent reset loops.
+
+atdev="$1"
+cell_section="${2:-cellular}"
+iccid="$3"
+
+[ -c "$atdev" ] || exit 1
+echo "$iccid" | grep -Eq '^[0-9]{19,20}$' || {
+	logger -t simmanager-jio "Ignored Jio preparation because the ICCID reply was invalid."
+	exit 0
+}
+
+state_dir="${SIMMANAGER_STATE_DIR:-/etc/simmanager/state}"
+marker="$state_dir/xlat-${cell_section}.state"
+restart_state="$state_dir/xlat-${cell_section}.restart"
+legacy_marker="/tmp/simmanager-xlat-${cell_section}.state"
+at_lock="${SIMMANAGER_AT_LOCK:-/tmp/simmanager-at.lock}"
+restart_cooldown="${SIMMANAGER_JIO_RESTART_COOLDOWN:-900}"
+
+mkdir -p "$state_dir" || exit 1
+
+locked_at() {
+	(
+		flock -x 9
+		at-cmd "$@"
+	) 9>"$at_lock"
+}
+
+profile=$(uci -q get "cellular.${cell_section}.hw_sim")
+case "$profile" in sim1|sim2) ;; *) profile="" ;; esac
+
+previous_signature=$(cat "$marker" 2>/dev/null)
+previous_iccid=$(printf '%s\n' "$previous_signature" | cut -d '|' -f 2)
+
+# Migrate the former volatile marker without forcing another modem restart.
+if [ -z "$previous_signature" ] && [ -f "$legacy_marker" ]; then
+	legacy_signature=$(cat "$legacy_marker" 2>/dev/null)
+	legacy_iccid=$(printf '%s\n' "$legacy_signature" | cut -d '|' -f 2)
+	if [ "$legacy_iccid" = "$iccid" ]; then
+		previous_signature="$legacy_signature"
+		previous_iccid="$legacy_iccid"
+		printf '%s\n' "$legacy_signature" > "$marker"
+		sync
+		logger -t simmanager-jio "Migrated the prepared Jio ICCID marker to persistent storage."
+	fi
+fi
+
+# Only a different validated ICCID may discard state belonging to a prior SIM.
+if [ -n "$previous_iccid" ] && [ "$previous_iccid" != "$iccid" ]; then
+	rm -f "$marker" "$restart_state"
+	previous_signature=""
+	previous_iccid=""
+fi
+
+imsi=$(locked_at "$atdev" AT+CIMI 2>/dev/null | tr -d '\r' | grep -E '^[0-9]{14,16}$' | head -n 1)
+operator=$(locked_at "$atdev" 'AT+COPS?' 2>/dev/null | tr -d '\r' | grep -E '^\+COPS:' | tail -n 1)
+pdp_address=$(locked_at "$atdev" 'AT+CGPADDR=1' 2>/dev/null | tr -d '\r' | grep -E '^\+CGPADDR:' | tail -n 1)
+
+is_jio=0
+case "$imsi" in 405869*) is_jio=1 ;; esac
+printf '%s\n' "$operator" | grep -Eqi 'Jio|405869' && is_jio=1
+
+is_ipv6_only=0
+if [ -n "$pdp_address" ]; then
+	printf '%s\n' "$pdp_address" | grep -q ':' && is_ipv6_only=1
+	printf '%s\n' "$pdp_address" | grep -Eq '"[0-9]{1,3}(\.[0-9]{1,3}){3}"' && is_ipv6_only=0
+fi
+
+if [ "$is_jio" != 1 ] && [ "$is_ipv6_only" != 1 ]; then
+	if [ "$previous_iccid" = "$iccid" ]; then
+		logger -t simmanager-jio "Ignored an inconclusive operator/PDP sample for the prepared ICCID; persistent state was retained."
+	fi
+	exit 0
+fi
+
+signature="v3|${iccid}|${imsi}|jionet|IPV4V6|nat1|clat1"
+nat=$(locked_at "$atdev" 'AT+QCFG="nat"' 2>/dev/null | tr -d '\r' | sed -n 's/^+QCFG: "nat",\([01]\)$/\1/p' | tail -n 1)
+clat=$(locked_at "$atdev" 'AT+QCFG="clat"' 2>/dev/null | tr -d '\r' | sed -n 's/^+QCFG: "clat",\([01]\).*$/\1/p' | tail -n 1)
+
+same_iccid=0
+[ "$previous_iccid" = "$iccid" ] && same_iccid=1
+confirmed_disabled=0
+[ "$nat" = 0 ] && confirmed_disabled=1
+[ "$clat" = 0 ] && confirmed_disabled=1
+
+if [ "$same_iccid" = 1 ] && [ "$confirmed_disabled" != 1 ] && { [ -z "$nat" ] || [ -z "$clat" ]; }; then
+	logger -t simmanager-jio "Ignored an uncertain NAT/CLAT reply for the prepared ICCID; no modem restart was allowed."
+	exit 0
+fi
+
+if [ "$same_iccid" = 1 ] && [ "$nat" = 1 ] && [ "$clat" = 1 ]; then
+	if [ "$previous_signature" != "$signature" ]; then
+		printf '%s\n' "$signature" > "$marker"
+		sync
+	fi
+	exit 0
+fi
+
+uci set "cellular.${cell_section}.m_apn_auto=0"
+uci set "cellular.${cell_section}.m_apn=jionet"
+uci set "cellular.${cell_section}.m_pdp=IPV4V6"
+uci set "cellular.${cell_section}.m_netmode=AUTO"
+uci commit cellular
+
+if [ -n "$profile" ] && [ "$(uci -q get "simmanager.${profile}")" = profile ]; then
+	uci set "simmanager.${profile}.apn_auto=0"
+	uci set "simmanager.${profile}.apn=jionet"
+	uci set "simmanager.${profile}.pdp_type=IPV4V6"
+	uci set "simmanager.${profile}.network_mode=AUTO"
+	uci commit simmanager
+fi
+sync
+
+locked_at "$atdev" 'AT+QNETDEVCTL=1,3,0' >/dev/null 2>&1
+locked_at "$atdev" 'AT+QCFG="CLAT",1,1,"",0,"ipv4only.arpa.",0,0,1,1,2,2' >/dev/null 2>&1 || exit 1
+locked_at "$atdev" 'AT+QCFG="nat",1' >/dev/null 2>&1 || exit 1
+locked_at "$atdev" 'AT+CGDCONT=1,"IPV4V6","jionet"' >/dev/null 2>&1 || exit 1
+locked_at "$atdev" 'AT+QNWPREFCFG="mode_pref",AUTO' >/dev/null 2>&1 || exit 1
+printf '%s\n' "$signature" > "$marker"
+sync
+logger -t simmanager-jio "Prepared ${profile:-active SIM} for IPv6-only service using RM500U CLAT and NAT."
+
+needs_restart=0
+[ "$same_iccid" != 1 ] && needs_restart=1
+[ "$confirmed_disabled" = 1 ] && needs_restart=1
+
+if [ "$needs_restart" = 1 ]; then
+	now=$(date +%s)
+	last_iccid=$(cut -d '|' -f 1 "$restart_state" 2>/dev/null)
+	last_restart=$(cut -d '|' -f 2 "$restart_state" 2>/dev/null)
+	case "$last_restart" in ''|*[!0-9]*) last_restart=0 ;; esac
+	elapsed=$((now - last_restart))
+	if [ "$last_iccid" = "$iccid" ] && [ "$elapsed" -ge 0 ] && [ "$elapsed" -lt "$restart_cooldown" ]; then
+		logger -t simmanager-jio "CLAT settings were repaired, but the modem restart was suppressed by the ${restart_cooldown}-second safety cooldown."
+		exit 0
+	fi
+
+	printf '%s|%s\n' "$iccid" "$now" > "$restart_state"
+	sync
+	logger -t simmanager-jio "Restarting the RM500U once after a confirmed new Jio ICCID or disabled CLAT/NAT state."
+	locked_at "$atdev" 'AT+CFUN=1,1' >/dev/null 2>&1
+	exit 10
+fi
+
+exit 0

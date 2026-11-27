@@ -193,7 +193,6 @@ do
     iccid=$(at-cmd "${atdev}" AT+CCID | grep "+CCID:" | cut -d ":" -f2 | sed 's/\ //g' | tr -d '\r')
     iccid_len=$(echo "${iccid}" | wc -L)
     if [ "${iccid_len}" != "20" ] && [ "${iccid_len}" != "19" ] ;then
-        rm -f "/tmp/simmanager-xlat-${cell_section}.state"
         iccid="NO SIM"
         cpin="None"
         isp="None"

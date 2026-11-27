@@ -31,6 +31,7 @@ newer cumulative file, or reverted.
 | [`modem_command_collision_restart_fix`](modem_command_collision_restart_fix/README.md) | Active, latest cumulative worker delta | `/usr/sbin/cellular/quectel_rm500u` |
 | [`opkg_feed_cleanup`](opkg_feed_cleanup/README.md) | Active, exact standalone file | `/etc/opkg/distfeeds.conf` |
 | [`sim_switch_fast_connectivity_acceptance`](sim_switch_fast_connectivity_acceptance/README.md) | Active, latest activation-control delta | `/usr/sbin/simmanager-control` |
+| [`jio_return_fast_path`](jio_return_fast_path/README.md) | Active, latest Jio-helper delta | `/usr/sbin/simmanager-jio-ensure` |
 
 These files are hardware/firmware-specific to the ZBT-Z8106AX-2SIM router and its vendor OpenWrt build. Do not apply them blindly to another model or firmware revision.
 

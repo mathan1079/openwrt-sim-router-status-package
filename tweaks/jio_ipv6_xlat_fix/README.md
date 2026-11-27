@@ -30,10 +30,16 @@ vendor worker is already archived under
 `tweaks/sim_switch_network_isolation_fix/changed/`, and the pre-change
 controller is archived under `tweaks/sim_switch_timing_fix/original/`.
 
-Current verified hashes:
+Verified hashes for this historical stage (the helper is now superseded by
+`jio_return_fast_path`):
 
 - `/usr/sbin/simmanager-jio-ensure`: `79cd4504b5c0f41f067b5a408719fada4eb73cd3e8d467b6b3220bb6b9ab42ff`
-- cumulative `/usr/sbin/cellular/quectel_rm500u`: `e160b6270ff7b654320d84be11c1296b71e10138a20f763f44b7dbb7aa8d3c6a`
+- historical cumulative `/usr/sbin/cellular/quectel_rm500u`: `e160b6270ff7b654320d84be11c1296b71e10138a20f763f44b7dbb7aa8d3c6a`
+
+The authoritative current worker snapshot is
+`901bc55e8dc52e6df83a7be6d482d28bfe50d9f9442fb66d3ea29519b073aeba`.
+It additionally retains prepared XLAT state when an ICCID read is temporarily
+invalid, instead of treating the sample as a SIM removal.
 
 ## Verified working settings
 
