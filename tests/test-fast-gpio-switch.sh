@@ -36,7 +36,7 @@ if [ "$1" = -q ] && [ "$2" = get ]; then
     case "$key" in
         cellular.cellular.hw_sim) cat "$MOCK_CURRENT_SIM" ;;
         cellular.cellular.idevice_model) echo rm500u_ea ;;
-        cellular.cellular.atdev) echo /dev/null ;;
+        cellular.cellular.atdev) echo /dev/zero ;;
         cellular.cellular.script) echo '/usr/sbin/cellular/quectel_rm500u 1 /dev/ttyUSB2 lan5 usb0 1 0' ;;
         hw_info.cellular.s_cfun|hw_info.cellular.s2_cfun) echo gpio ;;
         hw_info.cellular.s_fs|hw_info.cellular.s2_fs) echo gpio/sim ;;
@@ -58,15 +58,17 @@ EOF
 
 cat > "$mockbin/at-cmd" <<'EOF'
 #!/bin/sh
+port="$1"
 shift
 command="$1"
+echo "port:$port" >> "$MOCK_EVENTS"
 echo "at:$command" >> "$MOCK_EVENTS"
 case "$command" in
     AT+CCID)
         if [ "$(cat "$MOCK_GPIO")" = 1 ]; then
             echo '+CCID: 89918690400895597114'
         else
-            echo '+CCID: 8991000923788177231'
+            echo '+CCID: 8991000923788177231F'
         fi
         echo OK
         ;;
@@ -75,7 +77,6 @@ case "$command" in
             echo ERROR
         else
             printf '0\n' > "$MOCK_CFUN"
-            echo OK
         fi
         ;;
     AT+CFUN\?)
@@ -84,7 +85,6 @@ case "$command" in
         ;;
     AT+CFUN=1)
         printf '1\n' > "$MOCK_CFUN"
-        echo OK
         ;;
     AT+CPIN\?)
         [ "$(cat "$MOCK_CFUN")" = 1 ] && echo '+CPIN: READY'
@@ -115,6 +115,7 @@ export PATH="$mockbin:$PATH"
 export SIMMANAGER_CELLULAR_LIB="$tmp/cellular.sh"
 export SIMMANAGER_GPIO_ROOT="$mockroot"
 export SIMMANAGER_AT_LOCK="$tmp/at.lock"
+export SIMMANAGER_FAST_SWITCH_ATDEV=/dev/null
 export SIMMANAGER_FAST_SWITCH_READY_TIMEOUT=3
 export MOCK_CURRENT_SIM="$tmp/current-sim"
 export MOCK_GPIO="$mockroot/gpio/sim/value"
@@ -125,6 +126,8 @@ sh "$helper" sim1 1
 [ "$(cat "$MOCK_GPIO")" = 1 ] || { echo "FAIL: GPIO did not select SIM1"; exit 1; }
 [ "$(cat "$MOCK_CURRENT_SIM")" = sim1 ] || { echo "FAIL: UCI target was not updated"; exit 1; }
 grep -q '^watchsystem$' "$MOCK_EVENTS" || { echo "FAIL: detector was not restarted"; exit 1; }
+grep -q 'SIM 89918690400895597114 became ready' "$MOCK_EVENTS" || { echo "FAIL: padded source ICCID prevented target proof"; exit 1; }
+grep -q '^port:/dev/null$' "$MOCK_EVENTS" || { echo "FAIL: dedicated control port was not used"; exit 1; }
 grep -q '^flock:-u 9$' "$MOCK_EVENTS" || { echo "FAIL: AT lock was not released before detector restart"; exit 1; }
 ! grep -q '^hard-fallback:' "$MOCK_EVENTS" || { echo "FAIL: healthy fast path used hard fallback"; exit 1; }
 ! grep -q 'AT+CFUN=1,1' "$MOCK_EVENTS" || { echo "FAIL: healthy fast path reset the modem"; exit 1; }

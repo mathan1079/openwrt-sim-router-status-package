@@ -35,6 +35,8 @@ newer cumulative file, or reverted.
 | [`rm500u_cfun_gpio_fast_switch`](rm500u_cfun_gpio_fast_switch/README.md) | Active R&D, latest activation-controller delta | Controller and isolated fast-switch helper |
 | [`simmanager_at_lock_inheritance_fix`](simmanager_at_lock_inheritance_fix/README.md) | Active safety follow-up, latest controller/helper/SMS delta | Controller, fast-switch helper and SMS lock wrapper |
 | [`rm500u_gpio_readback_acceptance_fix`](rm500u_gpio_readback_acceptance_fix/README.md) | Active latest fast-helper delta | RM500U fast-switch helper |
+| [`rm500u_cfun_control_port_fix`](rm500u_cfun_control_port_fix/README.md) | Active latest fast-helper delta | RM500U fast-switch helper |
+| [`rm500u_iccid_padding_fix`](rm500u_iccid_padding_fix/README.md) | Active latest fast-helper delta | RM500U fast-switch helper |
 
 These files are hardware/firmware-specific to the ZBT-Z8106AX-2SIM router and its vendor OpenWrt build. Do not apply them blindly to another model or firmware revision.
 

@@ -2,8 +2,8 @@
 
 This directory is the authoritative local snapshot of router-owned files that
 were last fully reconciled with the live first router on 27 November 2026,
-after correcting AT-lock inheritance and GPIO write/read-back handling found
-by the first live RM500U CFUN/GPIO R&D switches.
+after correcting AT-lock inheritance, GPIO write/read-back handling, dedicated
+CFUN control-port behavior and modem ICCID padding found by live RM500U tests.
 
 Files below `files/` preserve their absolute router paths. This snapshot is for
 comparison, recovery planning and future patch preparation. Do not deploy the

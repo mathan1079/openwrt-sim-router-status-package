@@ -19,6 +19,8 @@ under `current_first_router/files/`.
 | `rm500u_cfun_gpio_fast_switch` | Active R&D/incorporated | Tries a proved CFUN/GPIO switch without USB restart and automatically falls back to unchanged vendor hard power cycling. Its first live fallback exposed an inherited AT-lock descriptor, corrected by `simmanager_at_lock_inheritance_fix`. |
 | `simmanager_at_lock_inheritance_fix` | Active/latest activation safety delta | Closes the AT lock before long-running workers, bounds controller/SMS lock waits, and lets proved Internet complete activation. |
 | `rm500u_gpio_readback_acceptance_fix` | Active/latest fast-helper delta | Uses the exact post-write GPIO read-back because this board can report a sysfs write failure after applying the selector value. |
+| `rm500u_cfun_control_port_fix` | Active/latest fast-helper delta | Uses dedicated `/dev/ttyUSB3` and proves CFUN states instead of requiring firmware-omitted `OK` replies. |
+| `rm500u_iccid_padding_fix` | Active/latest fast-helper delta | Normalizes one trailing ICCID padding nibble before strict decimal validation and identity proof. |
 | `celluar_crash_fix` | Active/incorporated | Atomic JSON behavior remains in the cumulative worker. Its old standalone changed worker is historical and must not be deployed over the current worker. |
 | `sim_switch_timing_fix` | Reverted/inactive | Neither archived changed file matches the router. Do not deploy without a fresh review and merge. |
 
