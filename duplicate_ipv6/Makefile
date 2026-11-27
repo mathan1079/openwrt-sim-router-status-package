@@ -4,11 +4,11 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-ipv6-cleaner
 PKG_VERSION:=1.0.0
-PKG_RELEASE:=5
+PKG_RELEASE:=10
 PKG_LICENSE:=MIT
 
 LUCI_TITLE:=Automatic deprecated public IPv6 cleaner
-LUCI_DEPENDS:=+luci-base +rpcd +ip-full +jshn +flock
+LUCI_DEPENDS:=+luci-base +rpcd +ip-full +jshn +flock +curl
 LUCI_PKGARCH:=all
 
 include $(TOPDIR)/feeds/luci/luci.mk
@@ -18,7 +18,7 @@ include $(TOPDIR)/feeds/luci/luci.mk
 else
 PACKAGE := luci-app-ipv6-cleaner
 VERSION ?= 1.0.0
-RELEASE ?= 5
+RELEASE ?= 10
 ROUTER ?= mathankpty-er605-local
 SCP_FLAGS ?= -O
 FORMAT ?= both

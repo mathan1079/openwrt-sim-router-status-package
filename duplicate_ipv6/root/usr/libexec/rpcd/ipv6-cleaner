@@ -1,10 +1,19 @@
 #!/bin/sh
 case "$1" in
- list) echo '{"status":{},"run":{}}';;
+ list) echo '{"status":{},"run":{},"inspect":{},"restart_stale":{"device":"","address":"","confirmed":false},"remove_stale":{"device":"","address":"","confirmed":false}}';;
  call)
   case "$2" in
    status) /usr/sbin/ipv6-cleaner status;;
    run) /usr/sbin/ipv6-cleaner run;;
+   inspect)
+    /usr/libexec/ipv6-cleaner-diagnostics run </dev/null >/dev/null 2>&1 &
+    echo '{"started":true}';;
+   remove_stale|restart_stale)
+    . /usr/share/libubox/jshn.sh
+    json_load "$(cat)" || exit 1
+    json_get_vars device address confirmed
+    [ "$confirmed" = 1 ] || { echo '{"error":"Explicit confirmation required"}'; exit 1; }
+    /usr/libexec/ipv6-cleaner-diagnostics restart "$device" "$address" confirmed;;
    *) exit 1;;
   esac;;
  *) exit 1;;

@@ -1,0 +1,45 @@
+#!/bin/sh
+# Restart only the owning logical DHCPv6 interface, never the parent IPv4 WAN.
+. /usr/share/libubox/jshn.sh
+dev="$1"; addr="$2"
+case "$dev" in ''|*[!a-zA-Z0-9_.:-]*) exit 1;; esac
+RUNDIR=/var/run/ipv6-cleaner
+umask 077
+mkdir -p "$RUNDIR/restarts" || exit 1
+exec 8>"$RUNDIR/restart.lock"
+flock -n 8 || exit 1
+json_load "$(ubus call network.interface dump)" || exit 1
+json_select interface || exit 1
+json_get_keys interfaces
+owner=''
+for item in $interfaces; do
+ json_select "$item"
+ json_get_vars interface proto l3_device up
+ if [ "$proto" = dhcpv6 ] && [ "$l3_device" = "$dev" ] && [ "$up" = 1 ]; then
+  if json_select ipv6-address; then
+   json_get_keys addresses
+   for index in $addresses; do
+    json_select "$index"
+    json_get_vars address mask
+    if [ "$address/$mask" = "$addr" ]; then
+     [ -z "$owner" ] || { echo 'Ambiguous DHCPv6 owner' >&2; exit 1; }
+     owner="$interface"
+    fi
+    json_select ..
+   done
+   json_select ..
+  fi
+ fi
+ json_select ..
+done
+case "$owner" in ''|*[!a-zA-Z0-9_.:-]*) echo 'No unique logical DHCPv6 owner found' >&2; exit 1;; esac
+now="$(date +%s)"; last=0
+[ ! -f "$RUNDIR/restarts/$owner" ] || read -r last < "$RUNDIR/restarts/$owner"
+[ "$((now-last))" -ge 60 ] || { echo 'IPv6 interface restart cooldown active' >&2; exit 1; }
+echo "$now" > "$RUNDIR/restarts/$owner"
+ubus call "network.interface.$owner" down >/dev/null
+# Always attempt up, even if down reported a transient error.
+ubus call "network.interface.$owner" up >/dev/null || exit 1
+echo "$now" > "$RUNDIR/last_restart"
+echo "$owner" > "$RUNDIR/last_restart_interface"
+logger -t ipv6-cleaner "Restarted logical IPv6 interface $owner for unreachable $addr on $dev; parent IPv4 interface was not restarted"

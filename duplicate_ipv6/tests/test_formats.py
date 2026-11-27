@@ -74,7 +74,7 @@ with open(os.environ['MOCK_LOG'],'a') as f: f.write(json.dumps({'scp':sys.argv[1
         r = self.run_script('build-apk.py')
         self.assertEqual(r.returncode, 0, r.stderr)
         record = self.records()[0]
-        for value in ['arch:noarch', 'version:1.2.3-r4', 'depends:luci-base rpcd ip-full jshn flock']:
+        for value in ['arch:noarch', 'version:1.2.3-r4', 'depends:luci-base rpcd ip-full jshn flock curl']:
             self.assertIn(value, record['args'])
         self.assertEqual(set(record['scripts']), {'post-install', 'post-upgrade', 'pre-deinstall', 'post-deinstall'})
         self.assertIn('etc/config/ipv6_cleaner', record['files'])

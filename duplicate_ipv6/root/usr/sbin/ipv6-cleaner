@@ -86,6 +86,45 @@ status() {
  if [ "$enabled" = 1 ] && [ "$running" = 1 ] && [ -f "$RUNDIR/next" ]; then read -r next < "$RUNDIR/next"; fi
  json_add_boolean running "$running"
  json_add_int next_scan "$next"
+ diagnostic_time=0
+ [ ! -f "$RUNDIR/diagnostics_time" ] || read -r diagnostic_time < "$RUNDIR/diagnostics_time"
+ json_add_int last_diagnostic "$diagnostic_time"
+ detection="$(uci -q get ipv6_cleaner.main.stale_detection)"
+ json_add_boolean stale_detection "$([ "$detection" = 1 ] && echo 1 || echo 0)"
+ diagnostic_running=0
+ if [ -f "$RUNDIR/diagnostic.pid" ]; then
+  read -r diagnostic_pid < "$RUNDIR/diagnostic.pid"
+  case "$diagnostic_pid" in ''|*[!0-9]*) ;; *) kill -0 "$diagnostic_pid" 2>/dev/null && diagnostic_running=1;; esac
+ fi
+ json_add_boolean diagnostic_running "$diagnostic_running"
+ last_restart=0; last_restart_interface=''
+ [ ! -f "$RUNDIR/last_restart" ] || read -r last_restart < "$RUNDIR/last_restart"
+ [ ! -f "$RUNDIR/last_restart_interface" ] || read -r last_restart_interface < "$RUNDIR/last_restart_interface"
+ json_add_int last_ipv6_restart "$last_restart"
+ json_add_string last_restart_interface "$last_restart_interface"
+ json_add_array diagnostics
+ if [ -f "$RUNDIR/diagnostics.tsv" ]; then
+  while read -r d a hits targets failures first_failure first_seen checked verdict; do
+   [ -n "$verdict" ] || continue
+   json_add_object ''
+   json_add_string device "$d"
+   json_add_string address "$a"
+   json_add_int successes "$hits"
+   json_add_int targets "$targets"
+   json_add_int failures "$failures"
+   json_add_int first_failure "$first_failure"
+   json_add_int first_seen "$first_seen"
+   json_add_int checked "$checked"
+   json_add_string verdict "$verdict"
+   json_close_object
+  done < "$RUNDIR/diagnostics.tsv"
+ fi
+ json_close_array
+ # A manual stale-address removal may be newer than the last deprecated scan.
+ if [ -f "$RUNDIR/last_clear" ]; then
+  read -r cleared < "$RUNDIR/last_clear"
+  json_add_int last_clear "$cleared"
+ fi
  json_dump
 }
 daemon() {
@@ -100,7 +139,18 @@ daemon() {
   "$0" run >/dev/null
  done
 }
+diagnostics_daemon() {
+ trap 'exit 0' TERM INT
+ while :; do
+  if [ "$(uci -q get ipv6_cleaner.main.enabled)" = 1 ] &&
+   [ "$(uci -q get ipv6_cleaner.main.stale_detection)" = 1 ]; then
+   /usr/libexec/ipv6-cleaner-diagnostics auto >/dev/null
+  fi
+  sleep 5 & wait $!
+ done
+}
 case "$1" in
+ diagnostics-daemon) diagnostics_daemon;;
  status) status;;
  run) run_once;;
  daemon) daemon;;

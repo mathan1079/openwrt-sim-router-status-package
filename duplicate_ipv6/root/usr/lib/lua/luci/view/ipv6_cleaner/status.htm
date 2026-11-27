@@ -9,6 +9,7 @@ local function esc(v) return pcdata(tostring(v or "")) end
 <table class="table cbi-section-table">
 <tr><td><%:Status%></td><td><%=esc(d.enabled and (d.running and translate("Scheduled") or translate("Enabled, service stopped")) or translate("Scheduling disabled"))%></td></tr>
 <tr><td><%:Saved action%></td><td><%=esc(d.mode)%></td></tr>
+<tr><td><%:Last IPv6-only restart%></td><td><%=esc(stamp(d.last_ipv6_restart))%> <%=esc(d.last_restart_interface)%></td></tr>
 <tr><td><%:Last scan%></td><td><%=esc(stamp(d.last_scan))%></td></tr>
 <tr><td><%:Last cleared time%></td><td><%=esc(stamp(d.last_clear))%></td></tr>
 <tr><td><%:Next scan / clearing attempt%></td><td><%=esc(stamp(d.next_scan))%></td></tr>
@@ -22,3 +23,13 @@ local function esc(v) return pcdata(tostring(v or "")) end
 <% end %>
 </table>
 <p><%:Reload this page to refresh status. Times and results reset after reboot. The next time is a scan; removal requires removal mode and eligible addresses.%></p>
+
+<h3><%:Stale ISP address diagnostics%></h3>
+<p><%:Last WAN check%>: <%=esc(stamp(d.last_diagnostic))%></p>
+<table class="table cbi-section-table">
+<tr><th><%:Device%></th><th><%:Preferred address%></th><th><%:Targets reached%></th><th><%:Finding%></th><th><%:Failed rounds%></th></tr>
+<% for _, a in ipairs(d.diagnostics or {}) do %>
+<tr><td><%=esc(a.device)%></td><td><%=esc(a.address)%></td><td><%=esc(a.successes)%> / <%=esc(a.targets)%></td><td><%=esc(a.verdict)%></td><td><%=esc(a.failures)%></td></tr>
+<% end %>
+</table>
+<p><%:Suspected stale requires at least 3 failed rounds over 30 seconds and a working alternative on the same WAN. Remove mode with curl 8.9+ automatically rechecks and restarts only the owning DHCPv6 interface in about one minute. Monitor mode never removes them.%></p>

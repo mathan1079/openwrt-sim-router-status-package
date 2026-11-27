@@ -58,7 +58,7 @@ def build():
         args = [tool, '--root', str(identity), 'mkpkg', '--info', 'name:' + package,
             '--info', f'version:{version}-r{release}', '--info', 'arch:noarch',
             '--info', 'license:MIT', '--info', 'description:Automatic deprecated public IPv6 cleaner with LuCI controls',
-            '--info', 'depends:luci-base rpcd ip-full jshn flock']
+            '--info', 'depends:luci-base rpcd ip-full jshn flock curl']
         for kind, script in [('post-install', 'postinst'), ('post-upgrade', 'postinst'),
                 ('pre-deinstall', 'prerm'), ('post-deinstall', 'postrm')]:
             f = stage / kind

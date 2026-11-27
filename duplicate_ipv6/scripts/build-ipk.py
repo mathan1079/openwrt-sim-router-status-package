@@ -9,7 +9,7 @@ import tarfile
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = 'luci-app-ipv6-cleaner'
 version = os.environ.get('VERSION', '1.0.0')
-release = os.environ.get('RELEASE', '5')
+release = os.environ.get('RELEASE', '10')
 for value in (version, release):
     if not re.fullmatch(r'[0-9][A-Za-z0-9.+~]*', value):
         raise SystemExit('VERSION and RELEASE must start with a digit and contain only letters, digits, . + ~')
@@ -57,7 +57,7 @@ Maintainer: luci-app-ipv6-cleaner contributors
 Section: luci
 Priority: optional
 License: MIT
-Depends: luci-base, rpcd, ip-full, jshn, flock
+Depends: luci-base, rpcd, ip-full, jshn, flock, curl
 Installed-Size: {size}
 Description: Automatic deprecated public IPv6 cleaner with LuCI controls
 """
