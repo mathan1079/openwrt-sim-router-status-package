@@ -21,11 +21,11 @@ return view.extend({
   o.rmempty = false;
   o = s.option(form.ListValue, 'mode', _('Action'));
   o.value('monitor', _('Monitor only (safe default)'));
-  o.value('remove', _('Remove deprecated addresses / restart stale IPv6 interface'));
+  o.value('remove', _('Remove deprecated addresses / restart IPv6 when multiple addresses exist'));
   o.description = _('Removing an address can interrupt connections still using it. Manual scans use the saved action even when scheduling is disabled.');
-  o = s.option(form.Flag, 'stale_detection', _('Check for stale ISP addresses'));
+  o = s.option(form.Flag, 'stale_detection', _('Watch for multiple public WAN IPv6 addresses'));
   o.rmempty = false;
-  o.description = _('Runs bounded connectivity checks for public /64 addresses with infinite lifetimes on WAN devices with multiple such addresses. In Remove mode, repeated failures with a working alternative trigger automatic IPv6-only interface restart in about one minute. Monitor mode never removes them.');
+  o.description = _('Remove mode restarts the affected DHCPv6 interface when it has two or more public addresses. Monitor mode only reports them.');
   o = s.option(form.Value, 'interval', _('Scan frequency (seconds)'));
   o.value('120', _('2 minutes (suggested)'));
   o.value('300', _('5 minutes'));
@@ -43,7 +43,7 @@ return view.extend({
   function confirmRemoval(addr) {
    ui.showModal(_('Restart this IPv6 interface?'), [
     E('p', {}, addr.device + ': ' + addr.address),
-    E('p', {}, _('This address failed both targets repeatedly for at least 30 seconds while another address on this WAN reached both. Only the owning logical DHCPv6 interface will restart. Its parent IPv4 interface and other WANs stay running. Both addresses will be rechecked first.')),
+    E('p', {}, _('This restarts the DHCPv6 interface if it still has two or more public addresses.')),
     E('div', { 'class': 'right' }, [
      E('button', { 'class': 'cbi-button', 'click': ui.hideModal }, _('Cancel')), ' ',
      E('button', { 'class': 'cbi-button cbi-button-negative', 'click': ui.createHandlerFn(this, function() {
@@ -90,22 +90,18 @@ return view.extend({
      })));
     });
     status.replaceChildren(table, addresses);
-    var labels = { reachable: _('Responded'), checking: _('Repeated checks pending'), suspected_stale: _('Suspected stale ISP address'), unverified: _('Inconclusive / WAN unavailable') };
     var diagnosticTable = E('table', { 'class': 'table' }, [E('tr', { 'class': 'tr' },
-     [_('Device'), _('Preferred address (infinite lifetime)'), _('Targets reached'), _('Finding'), _('Failed rounds'), _('First seen'), _('Action')].map(function(label) { return E('th', { 'class': 'th' }, label); }))]);
+     [_('Device'), _('Public IPv6 address'), _('Action')].map(function(label) { return E('th', { 'class': 'th' }, label); }))]);
     (data.diagnostics || []).forEach(function(addr) {
-     var row = E('tr', { 'class': 'tr' }, [addr.device, addr.address,
-      addr.successes < 0 ? _('Unknown') : addr.successes + '/' + addr.targets,
-      labels[addr.verdict] || addr.verdict, String(addr.failures), time(addr.first_seen)].map(function(value) { return E('td', { 'class': 'td' }, value); }));
-     row.appendChild(E('td', { 'class': 'td' }, addr.verdict === 'suspected_stale' ?
+     var row = E('tr', { 'class': 'tr' }, [addr.device, addr.address].map(function(value) { return E('td', { 'class': 'td' }, value); }));
+     row.appendChild(E('td', { 'class': 'td' }, addr.verdict === 'multiple_public' ?
       E('button', { 'class': 'cbi-button cbi-button-negative', 'click': function() { confirmRemoval(addr); } }, _('Restart IPv6 only')) : '—'));
      diagnosticTable.appendChild(row);
     });
     inspectButton.disabled = !!data.diagnostic_running;
     diagnosticStatus.replaceChildren(
      E('p', {}, (data.diagnostic_running ? _('Checking WAN addresses… ') : '') + _('Last WAN check: ') + time(data.last_diagnostic)),
-     diagnosticTable,
-     E('p', {}, _('Suspected stale requires at least 3 failed rounds over 30 seconds and an alternative on the same WAN that reaches both independent targets. Checks bind the exact source and device; older curl versions require matching routes. With curl 8.9+, Remove mode automatically rechecks and restarts only the owning DHCPv6 interface, targeting about one minute. Monitor mode only reports them. An outage affecting all addresses never qualifies. History resets after reboot.')));
+     diagnosticTable);
 
    }).catch(function(err) {
     status.replaceChildren(E('p', {}, _('Unable to load status: ') + err.message));
@@ -116,7 +112,7 @@ return view.extend({
    return E('div', {}, [E('h2', {}, _('Status')), status,
     E('div', { 'style': 'display: block !important; padding-top: 16px !important; padding-bottom: 8px !important;' }, [button]),
     E('p', {}, _('Times and results are kept in RAM and reset after reboot. The next time is a scan; removal happens only in removal mode when eligible addresses exist.')),
-    E('h3', {}, _('Stale ISP address diagnostics')), diagnosticStatus,
+    E('h3', {}, _('WANs with multiple public addresses')), diagnosticStatus,
     E('div', { 'style': 'padding-top: 16px; padding-bottom: 16px;' }, [inspectButton]),
     node]);
   });

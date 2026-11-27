@@ -7,6 +7,8 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+import runpy
+from unittest.mock import patch
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -74,7 +76,7 @@ with open(os.environ['MOCK_LOG'],'a') as f: f.write(json.dumps({'scp':sys.argv[1
         r = self.run_script('build-apk.py')
         self.assertEqual(r.returncode, 0, r.stderr)
         record = self.records()[0]
-        for value in ['arch:noarch', 'version:1.2.3-r4', 'depends:luci-base rpcd ip-full jshn flock curl']:
+        for value in ['arch:noarch', 'version:1.2.3-r4', 'depends:luci-base rpcd ip-full jshn flock']:
             self.assertIn(value, record['args'])
         self.assertEqual(set(record['scripts']), {'post-install', 'post-upgrade', 'pre-deinstall', 'post-deinstall'})
         self.assertIn('etc/config/ipv6_cleaner', record['files'])
@@ -105,6 +107,17 @@ with open(os.environ['MOCK_LOG'],'a') as f: f.write(json.dumps({'scp':sys.argv[1
         self.assertNotEqual(r.returncode, 0)
         self.assertIn('APK build requires', r.stderr)
         self.assertFalse(any('scp' in row for row in self.records()))
+
+    def test_tools_found_without_terminal_path_exports(self):
+        module = runpy.run_path(str(ROOT / 'scripts/build-apk.py'))
+        home = self.root / 'home'
+        binary = home / '.local/bin/apk'
+        binary.parent.mkdir(parents=True)
+        binary.write_text('#!/bin/sh\nexit 0\n')
+        binary.chmod(0o755)
+        with patch('shutil.which', return_value=None), patch('pathlib.Path.home', return_value=home):
+            self.assertEqual(module['resolve_tool']('apk'), str(binary))
+            self.assertIsNone(module['resolve_tool']('/missing/apk'))
 
     def test_python_syntax(self):
         for file in (ROOT / 'scripts').glob('*.py'):

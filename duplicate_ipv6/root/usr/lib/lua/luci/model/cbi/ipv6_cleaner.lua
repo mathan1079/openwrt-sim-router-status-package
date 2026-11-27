@@ -14,11 +14,11 @@ local o = s:option(Flag, "enabled", translate("Enable scheduled scans"))
 o.rmempty = false
 o = s:option(ListValue, "mode", translate("Action"))
 o:value("monitor", translate("Monitor only (safe default)"))
-o:value("remove", translate("Remove deprecated addresses / restart stale IPv6 interface"))
+o:value("remove", translate("Remove deprecated addresses / restart IPv6 when multiple addresses exist"))
 o.description = translate("Removing an address can interrupt existing connections. Manual scans use the saved action even when scheduling is disabled.")
-o = s:option(Flag, "stale_detection", translate("Check for stale ISP addresses"))
+o = s:option(Flag, "stale_detection", translate("Watch for multiple public WAN IPv6 addresses"))
 o.rmempty = false
-o.description = translate("Checks preferred public /64 addresses with infinite lifetimes. Remove mode automatically rechecks and restarts only the owning logical IPv6 interface in about one minute when another address on the same WAN works. Monitor mode only reports them.")
+o.description = translate("Remove mode restarts the affected DHCPv6 interface when it has two or more public addresses. Monitor mode only reports them.")
 o = s:option(Value, "interval", translate("Scan frequency (seconds)"))
 o:value("120", translate("2 minutes (suggested)"))
 o:value("300", translate("5 minutes"))
@@ -36,14 +36,14 @@ function o.write()
         m.message = translate("Scan finished. Reload the page to see the latest results.")
     end
 end
-o = s:option(Button, "_inspect", translate("Stale ISP diagnostics"))
+o = s:option(Button, "_inspect", translate("WAN address check"))
 o.inputtitle = translate("Check WAN addresses now")
 function o.write()
     sys.call("/usr/libexec/ipv6-cleaner-diagnostics run </dev/null >/dev/null 2>&1 &")
     m.message = translate("WAN checks started. Reload this page for results.")
 end
 for i, finding in ipairs(status.data.diagnostics or {}) do
-    if finding.verdict == "suspected_stale" then
+    if finding.verdict == "multiple_public" then
         local item = finding
         local confirm = s:option(Flag, "_confirm_stale_" .. i, translate("Confirm IPv6-only restart for ") .. item.address)
         confirm.description = translate("Only this logical DHCPv6 interface restarts. IPv4 and other WANs stay running.")

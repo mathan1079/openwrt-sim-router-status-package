@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise the real diagnostic shell and removal guards with isolated fixtures."""
+"""Exercise the WAN address count and restart policy with isolated fixtures."""
 import os
 from pathlib import Path
 import subprocess
@@ -22,10 +22,10 @@ class DiagnosticTests(unittest.TestCase):
         self.script.write_text((ROOT / 'root/usr/libexec/ipv6-cleaner-diagnostics').read_text().replace('/var/run/ipv6-cleaner', str(self.run)).replace('/usr/libexec/ipv6-cleaner-restart', str(self.bin / 'restart-ipv6')))
         self.env = dict(os.environ, PATH=str(self.bin) + os.pathsep + os.environ['PATH'],
             MOCK_MODE='stale', MOCK_TIME='1000', MOCK_DATA=str(self.root / 'addresses'),
-            MOCK_DELETE=str(self.root / 'kernel-deleted'), MOCK_RESTART=str(self.root / 'restarted'), MOCK_CURL_LOG=str(self.root / 'probes'))
+            MOCK_DELETE=str(self.root / 'kernel-deleted'), MOCK_RESTART=str(self.root / 'restarted'))
         data = ''.join('4: lan2 inet6 ' + addr + ' scope global noprefixroute valid_lft forever preferred_lft forever\n'
             for addr in [OLD, NEW, 'fd10:1234::1/64', 'fe80::1/64'])
-        (self.root / 'addresses').write_text(data)
+        (self.root / 'addresses').write_text(data.replace(OLD + ' scope global noprefixroute valid_lft forever preferred_lft forever', OLD + ' scope global dynamic noprefixroute valid_lft 900sec preferred_lft 800sec'))
         self.command('restart-ipv6', '#!/bin/sh\nprintf \'%s %s\\n\' "$1" "$2" >> "$MOCK_RESTART"\n')
         self.command('flock', '#!/bin/sh\nexit 0\n')
         self.command('logger', '#!/bin/sh\nexit 0\n')
@@ -39,105 +39,29 @@ case "$*" in
  *) cat "$MOCK_DATA";;
 esac
 """)
-        self.command('curl', """#!/usr/bin/env python3
-import os,sys
-args=sys.argv[1:]
-if args==['--version']:
- print('curl '+os.environ.get('MOCK_VERSION','8.21.0')); sys.exit(0)
-binding=args[args.index('--interface')+1]
-with open(os.environ['MOCK_CURL_LOG'],'a') as f: f.write(binding+'\\n')
-mode=os.environ.get('MOCK_MODE','stale')
-if mode=='unknown': sys.exit(45)
-if mode=='outage': sys.exit(7)
-if '2409:' in binding and mode!='recovered': sys.exit(7)
-print('2001:4860:4860::8888',end='')
-""")
-
     def command(self, name, content):
-        f = self.bin / name
-        f.write_text(content)
-        f.chmod(0o755)
+        file = self.bin / name
+        file.write_text(content)
+        file.chmod(0o755)
 
-    def invoke(self, *args, **env):
-        return subprocess.run(['sh', str(self.script), *args], env=dict(self.env, **env),
-            text=True, capture_output=True)
+    def invoke(self, mode='auto', **env):
+        subprocess.run(['sh', str(self.script), mode], env=dict(self.env, **env),
+            text=True, capture_output=True, check=True)
 
-    def rows(self):
-        return {r[1]:r for r in (line.split() for line in (self.run/'diagnostics.tsv').read_text().splitlines())}
+    def test_two_public_addresses_restart_once(self):
+        self.invoke()
+        self.assertEqual((self.root / 'restarted').read_text().splitlines(),
+            ['lan2 ' + NEW])
+        self.assertFalse((self.root / 'kernel-deleted').exists())
 
-    def qualify(self):
-        for now in ['1000','1015','1030']:
-            r = self.invoke('run', MOCK_TIME=now)
-            self.assertEqual(r.returncode,0,r.stderr)
-        self.assertEqual(self.rows()[OLD][8], 'suspected_stale')
+    def test_monitor_or_manual_check_does_not_restart(self):
+        self.invoke(MOCK_ACTION='monitor')
+        self.invoke('run')
+        self.assertFalse((self.root / 'restarted').exists())
 
-    def test_grace_repetition_and_device_binding(self):
-        for now, verdict in [('1000','checking'),('1015','checking'),('1029','checking'),('1030','suspected_stale')]:
-            r = self.invoke('run', MOCK_TIME=now)
-            self.assertEqual(r.returncode,0,r.stderr)
-            self.assertEqual(self.rows()[OLD][8],verdict)
-            self.assertEqual(self.rows()[NEW][8],'reachable')
-        probes=(self.root/'probes').read_text().splitlines()
-        self.assertTrue(probes and all(s.startswith('ifhost!lan2!') for s in probes))
-        self.assertFalse((self.root/'restarted').exists())
-
-    def test_recovery_and_outage_reset(self):
-        self.qualify()
-        for mode in ['recovered','outage','unknown']:
-            r = self.invoke('run', MOCK_MODE=mode, MOCK_TIME='1100')
-            self.assertEqual(r.returncode,0,r.stderr)
-            self.assertEqual(self.rows()[OLD][8], 'reachable' if mode=='recovered' else 'unverified')
-            self.assertEqual(self.rows()[OLD][4],'0')
-        self.assertFalse((self.root/'restarted').exists())
-
-    def test_old_curl_cannot_cross_wan(self):
-        r = self.invoke('run',MOCK_VERSION='7.88.0',MOCK_ROUTE='pppoe-wan1')
-        self.assertEqual(r.returncode,0,r.stderr)
-        self.assertEqual(self.rows()[OLD][8],'unverified')
-        self.assertFalse((self.root/'probes').exists())
-
-    def test_removal_guards(self):
-        self.qualify()
-        cases=[(('remove','lan2',OLD),{}),
-               (('remove','lan2',OLD,'confirmed'),{'MOCK_MODE':'recovered'}),
-               (('remove','lan2',OLD,'confirmed'),{'MOCK_MODE':'outage'}),
-               (('remove','lan2',OLD,'confirmed'),{'MOCK_TIME':'1400'}),
-               (('remove','lan2','fd10:1234::1/64','confirmed'),{})]
-        for args, changes in cases:
-            env={'MOCK_TIME':'1031'}; env.update(changes)
-            r=self.invoke(*args,**env)
-            self.assertNotEqual(r.returncode,0,r.stdout)
-            self.assertFalse((self.root/'restarted').exists())
-        r=self.invoke('remove','lan2',OLD,'confirmed',MOCK_TIME='1031')
-        self.assertEqual(r.returncode,0,r.stderr+r.stdout)
-        self.assertIn('"restarted":true',r.stdout)
-        self.assertIn(OLD,(self.root/'restarted').read_text())
-        self.assertFalse((self.root/'kernel-deleted').exists())
-
-    def test_automatic_removal_within_minute(self):
-        for now in ['1000','1015']:
-            r=self.invoke('auto',MOCK_TIME=now)
-            self.assertEqual(r.returncode,0,r.stderr)
-            self.assertFalse((self.root/'restarted').exists())
-        r=self.invoke('auto',MOCK_TIME='1030')
-        self.assertEqual(r.returncode,0,r.stderr+r.stdout)
-        self.assertIn(OLD,(self.root/'restarted').read_text())
-        self.assertNotIn(NEW,(self.root/'restarted').read_text())
-        self.assertFalse((self.root/'kernel-deleted').exists())
-
-    def test_auto_monitor_disabled_and_old_curl_never_delete(self):
-        for changes in [dict(MOCK_ACTION='monitor'),dict(MOCK_ENABLED='0'),dict(MOCK_VERSION='7.88.0')]:
-            for now in ['1000','1015','1030']:
-                r=self.invoke('auto',MOCK_TIME=now,**changes)
-                self.assertEqual(r.returncode,0,r.stderr)
-            self.assertFalse((self.root/'restarted').exists())
-
-    def test_gaps_reset_evidence(self):
-        for now in ['1000','1015','1200']:
-            r=self.invoke('auto',MOCK_TIME=now)
-            self.assertEqual(r.returncode,0,r.stderr)
-        self.assertFalse((self.root/'restarted').exists())
-        self.assertEqual(self.rows()[OLD][4],'1')
-
-if __name__=='__main__':
-    unittest.main(verbosity=2)
+    def test_one_public_address_does_not_restart(self):
+        data = self.root / 'addresses'
+        data.write_text(''.join(line for line in data.read_text().splitlines(keepends=True)
+            if OLD not in line))
+        self.invoke()
+        self.assertFalse((self.root / 'restarted').exists())

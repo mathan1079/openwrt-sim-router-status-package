@@ -9,7 +9,7 @@ import tarfile
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = 'luci-app-ipv6-cleaner'
 version = os.environ.get('VERSION', '1.0.0')
-release = os.environ.get('RELEASE', '10')
+release = os.environ.get('RELEASE', '14')
 for value in (version, release):
     if not re.fullmatch(r'[0-9][A-Za-z0-9.+~]*', value):
         raise SystemExit('VERSION and RELEASE must start with a digit and contain only letters, digits, . + ~')
@@ -57,7 +57,7 @@ Maintainer: luci-app-ipv6-cleaner contributors
 Section: luci
 Priority: optional
 License: MIT
-Depends: luci-base, rpcd, ip-full, jshn, flock, curl
+Depends: luci-base, rpcd, ip-full, jshn, flock
 Installed-Size: {size}
 Description: Automatic deprecated public IPv6 cleaner with LuCI controls
 """
@@ -67,7 +67,7 @@ postinst = """#!/bin/sh
 /etc/init.d/ipv6-cleaner restart
 rm -f /tmp/luci-indexcache
 rm -rf /tmp/luci-modulecache
-/etc/init.d/rpcd restart
+/etc/init.d/rpcd reload
 """
 prerm = """#!/bin/sh
 [ -n "$IPKG_INSTROOT" ] && exit 0
@@ -79,7 +79,7 @@ postrm = """#!/bin/sh
 [ -n "$IPKG_INSTROOT" ] && exit 0
 rm -f /tmp/luci-indexcache
 rm -rf /tmp/luci-modulecache
-/etc/init.d/rpcd restart
+/etc/init.d/rpcd reload
 """
 metadata = [('control', control.encode(), 0o644),
     ('conffiles', b'/etc/config/ipv6_cleaner\n', 0o644),

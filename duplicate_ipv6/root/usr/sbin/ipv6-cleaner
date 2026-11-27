@@ -103,21 +103,14 @@ status() {
  json_add_int last_ipv6_restart "$last_restart"
  json_add_string last_restart_interface "$last_restart_interface"
  json_add_array diagnostics
- if [ -f "$RUNDIR/diagnostics.tsv" ]; then
-  while read -r d a hits targets failures first_failure first_seen checked verdict; do
-   [ -n "$verdict" ] || continue
+ if [ -f "$RUNDIR/public-addresses.tsv" ]; then
+  while read -r device address; do
    json_add_object ''
-   json_add_string device "$d"
-   json_add_string address "$a"
-   json_add_int successes "$hits"
-   json_add_int targets "$targets"
-   json_add_int failures "$failures"
-   json_add_int first_failure "$first_failure"
-   json_add_int first_seen "$first_seen"
-   json_add_int checked "$checked"
-   json_add_string verdict "$verdict"
+   json_add_string device "$device"
+   json_add_string address "$address"
+   json_add_string verdict multiple_public
    json_close_object
-  done < "$RUNDIR/diagnostics.tsv"
+  done < "$RUNDIR/public-addresses.tsv"
  fi
  json_close_array
  # A manual stale-address removal may be newer than the last deprecated scan.

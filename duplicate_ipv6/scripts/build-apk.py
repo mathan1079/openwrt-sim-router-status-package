@@ -14,17 +14,39 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 
+def resolve_tool(command):
+    command = os.path.expanduser(command)
+    found = shutil.which(command)
+    if found:
+        return found
+    # Respect explicit executable overrides; only search standard locations for
+    # bare defaults. New terminal sessions may omit ~/.local/bin from PATH.
+    if command not in ('apk', 'fakeroot'):
+        return None
+    for directory in (Path.home() / '.local/bin', Path.home() / '.local/sbin',
+            Path('/opt/homebrew/bin'), Path('/usr/local/bin')):
+        candidate = directory / command
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+    return None
+
+
 def build():
     shared = runpy.run_path(str(ROOT / 'scripts/build-ipk.py'))
     version, release = shared['version'], shared['release']
     if not re.fullmatch(r'[0-9]+(?:\.[0-9]+)*[a-z]?(?:_(?:alpha|beta|pre|rc|cvs|svn|git|hg|p)[0-9]*)*(?:~[0-9a-f]+)?', version) or not release.isdigit():
         raise SystemExit('APK requires an APK-compatible VERSION (for example 1.0.0) and numeric RELEASE')
-    tool = os.environ.get('APK_TOOL', 'apk')
-    if not shutil.which(tool):
+    tool = resolve_tool(os.environ.get('APK_TOOL', 'apk'))
+    if not tool:
         raise SystemExit('APK build requires apk-tools 3 with mkpkg. Set APK_TOOL=/path/to/SDK/staging_dir/host/bin/apk on a compatible build host.')
     # mkpkg records filesystem ownership; fakeroot ensures installed files are root-owned.
     fakeroot = [] if os.geteuid() == 0 else shlex.split(os.environ.get('FAKEROOT', 'fakeroot'))
-    if os.geteuid() != 0 and (not fakeroot or not shutil.which(fakeroot[0])):
+    if fakeroot:
+        executable = resolve_tool(fakeroot[0])
+        if not executable:
+            raise SystemExit('APK build requires fakeroot (or a root build environment) for root-owned package files.')
+        fakeroot[0] = executable
+    elif os.geteuid() != 0:
         raise SystemExit('APK build requires fakeroot (or a root build environment) for root-owned package files.')
     probe = subprocess.run([tool, 'mkpkg', '--help'], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     if 'Usage: apk mkpkg' not in probe.stdout:
@@ -58,7 +80,7 @@ def build():
         args = [tool, '--root', str(identity), 'mkpkg', '--info', 'name:' + package,
             '--info', f'version:{version}-r{release}', '--info', 'arch:noarch',
             '--info', 'license:MIT', '--info', 'description:Automatic deprecated public IPv6 cleaner with LuCI controls',
-            '--info', 'depends:luci-base rpcd ip-full jshn flock curl']
+            '--info', 'depends:luci-base rpcd ip-full jshn flock']
         for kind, script in [('post-install', 'postinst'), ('post-upgrade', 'postinst'),
                 ('pre-deinstall', 'prerm'), ('post-deinstall', 'postrm')]:
             f = stage / kind
@@ -79,7 +101,7 @@ for path in [root, *root.rglob('*')]:
     os.chown(path, 0, 0)
 os.execv(spec['args'][0], spec['args'])
 """)
-        args[0] = shutil.which(tool)
+        args[0] = tool
         spec.write_text(json.dumps({'files': str(files), 'args': args}))
         command = fakeroot + [sys.executable, str(helper), str(spec)]
         subprocess.run(command, check=True, env=dict(os.environ, SOURCE_DATE_EPOCH='0'))

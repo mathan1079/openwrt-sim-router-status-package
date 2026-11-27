@@ -27,7 +27,7 @@ make clean
 
 Default router: `mathancbe-er605-local`, set near the top of the Makefile. To target another router: `make install ROUTER=your-router`. No FORMAT argument is needed. Installation builds the detected format automatically; plain builds never contact the router.
 
-Current outputs: `dist/luci-app-ipv6-cleaner_1.0.0-10_all.ipk` and `dist/luci-app-ipv6-cleaner-1.0.0-r10.apk`. This release increments the package revision so installed copies receive the updated UI.
+Current outputs: `dist/luci-app-ipv6-cleaner_1.0.0-14_all.ipk` and `dist/luci-app-ipv6-cleaner-1.0.0-r14.apk`. This release increments the package revision so installed copies receive the updated UI.
 
 Build requirements: make, Python 3, native apk-tools 3 with `mkpkg`, and fakeroot for non-root builds. Both formats build locally without Docker. APK metadata uses `noarch`; IPK uses `all`. If apk is outside PATH, APK_TOOL can point to its executable. The default scp flags are `-O`.
 
@@ -55,10 +55,8 @@ A real SDK build and router smoke test are required before production use: insta
 
 Implementation references: [LuCI example structure](https://github.com/openwrt/luci/tree/master/applications/luci-app-example), [LuCI build rules](https://github.com/openwrt/luci/blob/master/luci.mk).
 
-## Unreachable IPv6: restart only its IPv6 interface
+## Multiple public WAN IPv6 addresses
 
-Enable **Check for stale ISP addresses** and choose Remove mode. A separate watcher checks source/device-bound connectivity independently of the deprecated cleanup interval. When one preferred public /64 address with infinite lifetimes repeatedly fails both targets across at least three rounds and 30 seconds, while another address on that device reaches both, the cleaner restarts only the uniquely owning logical DHCPv6 interface (for example `wan2_6`). It does not delete the preferred address with `ip addr del`, rewrite netifd state, restart the parent IPv4 interface, or restart other WANs.
+Enable **Watch for multiple public WAN IPv6 addresses** and select Remove mode. The watcher checks local WAN addresses about every five seconds. If two public addresses belong to the same logical DHCPv6 interface, it restarts that interface. A 60-second cooldown prevents rapid repeat restarts if the upstream assigns both again. Monitor mode displays the addresses.
 
-The target is roughly one minute for two addresses; probe timeouts or more addresses can extend it. Each logical IPv6 interface has a 60-second restart cooldown. All checks are repeated before restarting. Monitor mode reports only. curl 8.9+ is required for automatic action, to bind both source and device. If the upstream continues to advertise an old prefix, a restart may receive it again; no prefix blacklists or network configuration rewrites are applied.
-
-The existing explicit-deprecated-address cleanup remains controlled by the normal scan interval. LuCI shows the last IPv6-only restart separately from the last address deletion.
+LuCI shows the last IPv6-only restart separately from deprecated address deletion.
