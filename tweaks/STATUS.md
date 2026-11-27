@@ -1,6 +1,6 @@
 # First-router tweak status
 
-Last audited: 26 November 2026, 11:16 IST.
+Last audited: 27 November 2026, 12:02 PM IST.
 
 This is the ownership map for router-level changes. The exact current files are
 under `current_first_router/files/`.
@@ -14,6 +14,7 @@ under `current_first_router/files/`.
 | `cellular_worker_single_instance_fix` | Active/incorporated | Signal and PID-lock behavior is in the cumulative worker. |
 | `modem_command_collision_restart_fix` | Active/latest delta | Complete before/after worker files and a real unified patch are archived here. |
 | `opkg_feed_cleanup` | Active | Removes duplicate, obsolete snapshot and missing MediaTek feeds without changing installed packages. |
+| `sim_switch_fast_connectivity_acceptance` | Active/latest delta | Skips the redundant post-switch reload and accepts a new SIM after two consecutive 2-of-3 Internet proofs. |
 | `celluar_crash_fix` | Active/incorporated | Atomic JSON behavior remains in the cumulative worker. Its old standalone changed worker is historical and must not be deployed over the current worker. |
 | `sim_switch_timing_fix` | Reverted/inactive | Neither archived changed file matches the router. Do not deploy without a fresh review and merge. |
 

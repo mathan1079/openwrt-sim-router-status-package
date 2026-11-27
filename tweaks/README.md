@@ -30,6 +30,7 @@ newer cumulative file, or reverted.
 | [`cellular_ping_monitor_stability_fix`](cellular_ping_monitor_stability_fix/README.md) | Active, exact standalone file | `/usr/sbin/ping_cellular.sh` |
 | [`modem_command_collision_restart_fix`](modem_command_collision_restart_fix/README.md) | Active, latest cumulative worker delta | `/usr/sbin/cellular/quectel_rm500u` |
 | [`opkg_feed_cleanup`](opkg_feed_cleanup/README.md) | Active, exact standalone file | `/etc/opkg/distfeeds.conf` |
+| [`sim_switch_fast_connectivity_acceptance`](sim_switch_fast_connectivity_acceptance/README.md) | Active, latest activation-control delta | `/usr/sbin/simmanager-control` |
 
 These files are hardware/firmware-specific to the ZBT-Z8106AX-2SIM router and its vendor OpenWrt build. Do not apply them blindly to another model or firmware revision.
 

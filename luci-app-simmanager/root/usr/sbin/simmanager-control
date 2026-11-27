@@ -16,7 +16,9 @@ automatic_latest_file="$backup_root/automatic-latest"
 automatic_request=0
 at_lock=${SIMMANAGER_AT_LOCK:-/tmp/simmanager-at.lock}
 activation_probe_hosts=${SIMMANAGER_ACTIVATION_PROBES:-"1.1.1.1 8.8.8.8 9.9.9.9"}
-activation_monitor_interval=${SIMMANAGER_ACTIVATION_INTERVAL:-5}
+activation_monitor_interval=${SIMMANAGER_ACTIVATION_INTERVAL:-2}
+activation_required_successes=${SIMMANAGER_ACTIVATION_SUCCESSES:-2}
+activation_max_checks=${SIMMANAGER_ACTIVATION_MAX_CHECKS:-45}
 
 locked_at() {
 	(
@@ -228,16 +230,16 @@ activation_health_check() {
 wait_for_stable_connectivity() {
 	checks=0
 	consecutive=0
-	while [ "$checks" -lt 24 ]; do
+	while [ "$checks" -lt "$activation_max_checks" ]; do
 		automation_allowed || return 1
 		if activation_health_check; then
 			consecutive=$((consecutive + 1))
-			[ "$consecutive" -ge 3 ] && return 0
+			[ "$consecutive" -ge "$activation_required_successes" ] && return 0
 		else
 			consecutive=0
 		fi
 		checks=$((checks + 1))
-		[ "$checks" -lt 24 ] && sleep "$activation_monitor_interval"
+		[ "$checks" -lt "$activation_max_checks" ] && sleep "$activation_monitor_interval"
 	done
 	return 1
 }
@@ -268,7 +270,7 @@ restore_backup() {
 		restored_switch=1
 	fi
 	[ "$restored_switch" = 1 ] || /etc/init.d/cellular reload || return 1
-	return 0
+	wait_for_stable_connectivity
 }
 
 set_request_mode() {
@@ -357,9 +359,9 @@ activate_profile() {
 		return 1
 	fi
 	if [ "$did_switch" = 1 ]; then
-		write_status waiting "Waiting for the switched SIM to register and provide stable Internet connectivity." "$target" "$backup"
+		write_status waiting "Waiting for the switched SIM to provide verified Internet connectivity." "$target" "$backup"
 	else
-		write_status waiting "Reloading the active SIM profile and waiting for stable Internet connectivity." "$target" "$backup"
+		write_status waiting "Reloading the active SIM profile and waiting for verified Internet connectivity." "$target" "$backup"
 		/etc/init.d/cellular reload || {
 			write_status rolling_back "Cellular profile reload failed; restoring the previous configuration." "$target" "$backup"
 			restore_backup "$backup"
@@ -367,10 +369,10 @@ activate_profile() {
 			return 1
 		}
 	fi
-	if ! wait_for_registration || ! wait_for_stable_connectivity; then
-		write_status rolling_back "Network registration failed; restoring the previous SIM and configuration." "$target" "$backup"
+	if ! wait_for_stable_connectivity; then
+		write_status rolling_back "Internet verification failed; restoring the previous SIM and configuration." "$target" "$backup"
 		restore_backup "$backup"
-		write_status failed "The selected SIM did not establish stable Internet connectivity. Automatic rollback was attempted." "$target" "$backup"
+		write_status failed "The selected SIM did not establish verified Internet connectivity. Automatic rollback was attempted." "$target" "$backup"
 		return 1
 	fi
 

@@ -1,7 +1,8 @@
 # Current first-router snapshot
 
 This directory is the authoritative local snapshot of router-owned files that
-were extended with the verified OPKG feed file on 26 November 2026 at 11:16 IST.
+were updated with the verified fast-switch controller on 27 November 2026 at
+12:02 PM IST.
 
 Files below `files/` preserve their absolute router paths. This snapshot is for
 comparison, recovery planning and future patch preparation. Do not deploy the
