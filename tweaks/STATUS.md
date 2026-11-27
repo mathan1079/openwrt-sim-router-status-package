@@ -1,6 +1,6 @@
 # First-router tweak status
 
-Last audited: 27 November 2026, after the first live CFUN/GPIO switch test.
+Last audited: 27 November 2026, after release 1.6.0-5 corrected packaged helper permissions.
 
 This is the ownership map for router-level changes. The exact current files are
 under `current_first_router/files/`.
@@ -25,6 +25,7 @@ under `current_first_router/files/`.
 | `automatic_switch_history` | Reviewed/pending deployment | Persists complete automatic-attempt trigger and result records across restarts, with a 10-row paginated LuCI table, protected bulk deletion, seven-day retention and a 100-completed-record cap. The current live-router snapshot is intentionally unchanged. |
 | `lte_nr_only_network_mode` | Active/deployed | Existing profile mode row now supports LTE/5G SA/5G NSA multi-select choices. SIM1, SIM2, vendor UCI and the live RM500U are confirmed on `NR5G:LTE`; Jio remains SA n78 with IPv4/IPv6 healthy and no `br-lan` interruption. |
 | `network_mode_checkbox_state_fix` | Active/deployed | Release `1.6.0-4` corrects LuCI 21.02 MultiValue rendering. Both profiles render LTE, 5G SA and 5G NSA as selected while storage and the live modem remain `NR5G:LTE`. |
+| `packaged_helper_permission_fix` | Active/deployed | Release `1.6.0-5` preserves executable mode for `simmanager-fast-switch` and `simmanager-jio-ensure`; release `1.6.0-4` had installed both as mode `0644`, silently bypassing the fast switch and Jio helper paths. |
 | `celluar_crash_fix` | Active/incorporated | Atomic JSON behavior remains in the cumulative worker. Its old standalone changed worker is historical and must not be deployed over the current worker. |
 | `sim_switch_timing_fix` | Reverted/inactive | Neither archived changed file matches the router. Do not deploy without a fresh review and merge. |
 

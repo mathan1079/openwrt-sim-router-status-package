@@ -108,6 +108,8 @@ find "$work_dir/data" -type f -exec chmod 644 {} \;
 chmod 755 "$work_dir/data/usr/sbin/simmanager-status"
 chmod 755 "$work_dir/data/usr/sbin/simmanager-control"
 chmod 755 "$work_dir/data/usr/sbin/simmanager-auto"
+chmod 755 "$work_dir/data/usr/sbin/simmanager-fast-switch"
+chmod 755 "$work_dir/data/usr/sbin/simmanager-jio-ensure"
 chmod 755 "$work_dir/data/usr/sbin/simmanager-sms"
 chmod 755 "$work_dir/data/usr/sbin/simmanager-sms-daemon"
 chmod 755 "$work_dir/data/usr/libexec/simmanager-sms"

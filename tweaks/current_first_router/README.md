@@ -2,9 +2,14 @@
 
 This directory is the authoritative local snapshot of router-owned files that
 were last fully reconciled with the live first router on 27 November 2026,
-after deploying SIM Manager `1.6.0-4`. The snapshot includes the persistent
+after deploying SIM Manager `1.6.0-5`. The snapshot includes the persistent
 automatic-switch history implementation and the LTE/5G SA/5G NSA profile
 selector, along with the earlier AT-lock, GPIO, CFUN, ICCID and Jio safeguards.
+
+Release `1.6.0-5` corrected package payload permissions: both
+`files/usr/sbin/simmanager-fast-switch` and
+`files/usr/sbin/simmanager-jio-ensure` are installed with mode `0755`. Their
+contents and SHA-256 hashes are unchanged from `1.6.0-4`.
 
 At reconciliation time SIM1 and SIM2 profiles, vendor UCI and the live RM500U
 all used `NR5G:LTE`. Jio was registered on 5G SA n78 with both IPv4 and IPv6
