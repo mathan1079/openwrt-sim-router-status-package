@@ -14,6 +14,11 @@ The active cumulative implementation protects configuration with checkpoints,
 uses bounded interface-bound Internet proof, prevents inherited AT locks,
 validates GPIO read-back, uses the dedicated CFUN control port, accepts a
 trailing ICCID padding nibble and retains the vendor hard-power-cycle fallback.
+SIM readiness now distinguishes an ordinary timeout from two consecutive
+explicit modem replies reporting that the selected slot has no SIM. The
+activation controller returns status `10` after a successful rollback so the
+automatic policy can remember the empty target without confusing it with a
+generic registration failure. Unknown or busy AT replies never prove absence.
 
 ## Source stages merged
 

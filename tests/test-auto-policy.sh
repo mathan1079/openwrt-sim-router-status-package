@@ -26,6 +26,11 @@ assert_delay() {
 
 assert_eq "$(other_sim sim1)" sim2
 assert_eq "$(other_sim sim2)" sim1
+assert_eq "$(parse_sim_presence '+CPIN: READY')" present
+assert_eq "$(parse_sim_presence '+CPIN: SIM PIN')" present
+assert_eq "$(parse_sim_presence '+CME ERROR: 10')" absent
+assert_eq "$(parse_sim_presence '+CME ERROR: SIM not inserted')" absent
+assert_eq "$(parse_sim_presence 'ERROR')" unknown
 
 mode=primary
 retry_index=0

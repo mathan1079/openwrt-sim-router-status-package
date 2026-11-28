@@ -88,6 +88,10 @@ switch_count=0
 secondary_since=0
 failed_attempts=0
 next_switch_attempt=0
+sim1_presence=unknown
+sim2_presence=unknown
+sim1_retry_after=0
+sim2_retry_after=0
 cooldown_minutes=30
 max_switches_per_day=4
 failure_seconds=20
@@ -109,6 +113,26 @@ backoff_rc=$?
 set -e
 assert_eq "$backoff_rc" 4
 assert_eq "$switch_count" 1
+
+# An explicit target-slot absence is retained and receives the longest safety
+# backoff so the monitor cannot hammer an empty SIM slot every five seconds.
+next_switch_attempt=0
+failed_attempts=0
+switch_count=0
+SIMMANAGER_TEST_CONTROL_RC=10
+export SIMMANAGER_TEST_CONTROL_RC
+set +e
+switch_and_verify sim2 sim_removed
+absent_rc=$?
+set -e
+assert_eq "$absent_rc" 1
+assert_eq "$sim2_presence" absent
+[ "$sim2_retry_after" -ge $(( $(date +%s) + 298 )) ] || fail "missing target did not receive five-minute retry backoff"
+
+sim2_presence=unknown
+sim2_retry_after=0
+next_switch_attempt=0
+failed_attempts=0
 
 # Exit 3 means activation and rollback both failed. Automation must stop rather
 # than retrying from an unknown physical/configuration state.
@@ -146,8 +170,9 @@ assert_eq "$failed_attempts" 0
 assert_eq "$next_switch_attempt" 0
 
 history_count=$(find "$temp_dir/history" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')
-assert_eq "$history_count" 3
+assert_eq "$history_count" 4
 grep -R -q '"outcome":"activation_failed"' "$temp_dir/history" || fail "failed activation history was not completed"
+grep -R -q '"outcome":"target_sim_absent"' "$temp_dir/history" || fail "missing target history was not completed"
 grep -R -q '"outcome":"rollback_failed"' "$temp_dir/history" || fail "critical rollback history was not completed"
 grep -R -q '"outcome":"switched"' "$temp_dir/history" || fail "successful switch history was not completed"
 

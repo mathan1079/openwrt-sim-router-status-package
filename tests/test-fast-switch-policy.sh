@@ -48,6 +48,18 @@ if wait_for_stable_connectivity; then
 	fail "failed connectivity was accepted"
 fi
 
+# Two explicit modem replies are required before an empty target slot is
+# reported. Unknown replies remain a normal readiness timeout.
+activation_health_check() { return 1; }
+locked_at() { printf '+CME ERROR: 10\n'; }
+sleep() { :; }
+uci() { printf '/dev/null\n'; }
+set +e
+wait_for_sim_ready
+missing_rc=$?
+set -e
+[ "$missing_rc" = 10 ] || fail "confirmed missing SIM did not return status 10"
+
 # Once routed Internet is already proved, a busy AT port must not keep a
 # completed SIM switch in the switching state.
 activation_health_check() { return 0; }

@@ -1,14 +1,14 @@
 # Consolidated first-router tweak status
 
-Last consolidated: 27 November 2026.
+Last updated: 28 November 2026.
 
 | Topic | Cumulative state | Managed files |
 | --- | --- | --- |
 | `01-platform_maintenance` | Active | Watchdog and opkg feed configuration; packaged permission behavior documented |
 | `02-cellular_runtime_stability` | Active | RM500U worker, cellular prepare/detect and ping monitor |
-| `03-sim_switching_and_activation` | Active | Cellular init, activation controller, fast-switch helper and SMS helper |
+| `03-sim_switching_and_activation` | Active | Cellular init, activation controller, fast-switch helper, explicit empty-slot result and SMS helper |
 | `04-carrier_profiles_and_jio` | Active | Cellular/SIM configuration, profiles UI and Jio helper |
-| `05-automatic_switching` | Present in the authoritative snapshot | Automatic service, controller/UI and persistent history |
+| `05-automatic_switching` | Active | Automatic service, controller/UI, persistent history and confirmed SIM-removal failover guard |
 
 ## Historical status retained
 

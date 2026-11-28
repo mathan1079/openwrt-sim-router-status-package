@@ -1,6 +1,7 @@
-299e8666f92554f46b4896e86be7447b53fe9345604e57d7bce8d531283aa59f  ./README.md
-2d44ff40c999d3e7ca7b89644f1cda2e88e1c33ea0182aef9f3f06bda5bfbd93  ./change.patch
+d0bca47077c97f0e0afe59d6692c92e507db0bfe78a6eaf96edd904686aae8c9  ./README.md
+6eee54e9c6c5f2d748e4410f7a8929ae021e1a164a85f24d4615d1611968342c  ./change.patch
 9afe454c02e79d96d54a4320f6b298b211a8e97bc002f301f592688a4f9ead94  ./changed/etc/init.d/cellular
-89a981a7bd220dad946ff217a4a6ca3936b2701e8ed5783d9af4978a63a3c356  ./changed/usr/sbin/simmanager-control
+f6fa763b4f825adc27eaaca60ad69605e9c7f487209a28a212337508fc50e551  ./changed/usr/lib/lua/luci/view/simmanager/activation.htm
+6168ddff07072794069658b2936f6bb974787ace20e3585a1f88b549ed1c3dd2  ./changed/usr/sbin/simmanager-control
 f18388ddaf5457e14deb3134dc086b60ce93248aff5d330a9bad15c11d44b0fb  ./changed/usr/sbin/simmanager-fast-switch
 df71a78c28b26a560edb2709b61966500504f0eda4021374bdff2051fd7133ee  ./changed/usr/sbin/simmanager-sms

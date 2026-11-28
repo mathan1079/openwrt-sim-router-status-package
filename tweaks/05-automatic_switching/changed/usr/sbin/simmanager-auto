@@ -21,6 +21,8 @@ control_lock_dir=${SIMMANAGER_CONTROL_LOCK_DIR:-/tmp/simmanager-control.lock}
 init_service=${SIMMANAGER_AUTO_INIT:-/etc/init.d/simmanager-auto}
 probe_hosts=${SIMMANAGER_AUTO_PROBES:-"1.1.1.1 8.8.8.8 9.9.9.9"}
 probe_hosts_v6=${SIMMANAGER_AUTO_PROBES_V6:-"2606:4700:4700::1111 2001:4860:4860::8888 2620:fe::fe"}
+at_lock=${SIMMANAGER_AT_LOCK:-/tmp/simmanager-at.lock}
+sim_absent_retry_seconds=${SIMMANAGER_SIM_ABSENT_RETRY_SECONDS:-300}
 monitor_interval=5
 history_id=""
 history_sequence=0
@@ -29,6 +31,7 @@ history_reason_text() {
 	case "$1" in
 		sustained_outage) printf '%s\n' "Connectivity failed continuously for the configured duration." ;;
 		reconnect_loop) printf '%s\n' "Frequent disconnect threshold was reached inside the observation window." ;;
+		sim_removed) printf '%s\n' "The modem confirmed that the active SIM card was removed." ;;
 		secondary_failed) printf '%s\n' "The active secondary SIM lost proved connectivity." ;;
 		scheduled_primary_retry) printf '%s\n' "The scheduled default-SIM return test became due." ;;
 		*) printf '%s\n' "Automatic switching policy requested a SIM change." ;;
@@ -133,6 +136,8 @@ history_write_end() {
 	json_add_string control_message "${control_message:-}"
 	json_add_string next_primary_retry "${next_retry:-0}"
 	json_add_string next_switch_attempt "${next_switch_attempt:-0}"
+	json_add_string sim1_presence "${sim1_presence:-unknown}"
+	json_add_string sim2_presence "${sim2_presence:-unknown}"
 	history_write_status=0
 	json_dump > "$record_dir/end.json.new" && mv -f "$record_dir/end.json.new" "$record_dir/end.json" || history_write_status=1
 	json_cleanup
@@ -213,6 +218,8 @@ write_status() {
 	json_add_string default_sim "${default_sim:-unknown}"
 	json_add_string next_retry "$next"
 	json_add_string next_switch_attempt "${next_switch_attempt:-0}"
+	json_add_string sim1_presence "${sim1_presence:-unknown}"
+	json_add_string sim2_presence "${sim2_presence:-unknown}"
 	json_add_string updated_at "$(date +%s)"
 	json_dump > "$status_new" && mv -f "$status_new" "$status_file"
 	json_cleanup
@@ -252,6 +259,10 @@ load_state() {
 	secondary_since=$(number_value "$(state_value secondary_since)" 0)
 	failed_attempts=$(number_value "$(state_value failed_attempts)" 0)
 	next_switch_attempt=$(number_value "$(state_value next_switch_attempt)" 0)
+	sim1_presence=$(state_value sim1_presence); case "$sim1_presence" in present|absent) ;; *) sim1_presence=unknown ;; esac
+	sim2_presence=$(state_value sim2_presence); case "$sim2_presence" in present|absent) ;; *) sim2_presence=unknown ;; esac
+	sim1_retry_after=$(number_value "$(state_value sim1_retry_after)" 0)
+	sim2_retry_after=$(number_value "$(state_value sim2_retry_after)" 0)
 }
 
 save_state() {
@@ -266,6 +277,10 @@ save_state() {
 		printf 'secondary_since=%s\n' "$secondary_since"
 		printf 'failed_attempts=%s\n' "$failed_attempts"
 		printf 'next_switch_attempt=%s\n' "$next_switch_attempt"
+		printf 'sim1_presence=%s\n' "${sim1_presence:-unknown}"
+		printf 'sim2_presence=%s\n' "${sim2_presence:-unknown}"
+		printf 'sim1_retry_after=%s\n' "${sim1_retry_after:-0}"
+		printf 'sim2_retry_after=%s\n' "${sim2_retry_after:-0}"
 	} > "$state_new" && mv -f "$state_new" "$state_file"
 }
 
@@ -281,6 +296,90 @@ guard_enabled() {
 	if [ "$(uci -q get cellular.cellular.hw_asw)" = "1" ]; then
 		disable_for_vendor_conflict
 		return 1
+	fi
+	return 0
+}
+
+locked_at() {
+	(
+		flock -w 3 -x 9 || exit 75
+		timeout 6 at-cmd "$@"
+	) 9>"$at_lock"
+}
+
+parse_sim_presence() {
+	reply="$1"
+	if printf '%s\n' "$reply" | grep -Eq '^\+CPIN:[[:space:]]*(READY|SIM PIN|SIM PUK|PH-[^[:space:]]+)'; then
+		printf 'present\n'
+	elif printf '%s\n' "$reply" | grep -Eqi 'SIM (not inserted|not present)|NOT INSERTED|\+CME ERROR:[[:space:]]*10([^0-9]|$)'; then
+		printf 'absent\n'
+	else
+		printf 'unknown\n'
+	fi
+}
+
+active_sim_presence() {
+	query_port=/dev/ttyUSB3
+	[ -c "$query_port" ] || query_port=$(uci -q get cellular.cellular.atdev)
+	[ -n "$query_port" ] || { printf 'unknown\n'; return 0; }
+	cpin_reply=$(locked_at "$query_port" 'AT+CPIN?' 2>/dev/null | tr -d '\r')
+	parse_sim_presence "$cpin_reply"
+}
+
+slot_presence() {
+	case "$1" in
+		sim1) printf '%s\n' "${sim1_presence:-unknown}" ;;
+		sim2) printf '%s\n' "${sim2_presence:-unknown}" ;;
+		*) printf 'unknown\n' ;;
+	esac
+}
+
+slot_retry_after() {
+	case "$1" in
+		sim1) printf '%s\n' "${sim1_retry_after:-0}" ;;
+		sim2) printf '%s\n' "${sim2_retry_after:-0}" ;;
+		*) printf '0\n' ;;
+	esac
+}
+
+mark_slot_present() {
+	case "$1" in
+		sim1) sim1_presence=present; sim1_retry_after=0 ;;
+		sim2) sim2_presence=present; sim2_retry_after=0 ;;
+		*) return 1 ;;
+	esac
+	save_state
+}
+
+mark_slot_absent() {
+	slot="$1"
+	now="$2"
+	pause_switches="${3:-0}"
+	retry_after=$((now + sim_absent_retry_seconds))
+	case "$slot" in
+		sim1) sim1_presence=absent; sim1_retry_after="$retry_after" ;;
+		sim2) sim2_presence=absent; sim2_retry_after="$retry_after" ;;
+		*) return 1 ;;
+	esac
+	[ "$pause_switches" != 1 ] || next_switch_attempt="$retry_after"
+	save_state
+}
+
+target_slot_available() {
+	target="$1"
+	now="$2"
+	presence=$(slot_presence "$target")
+	retry_after=$(slot_retry_after "$target")
+	if [ "$presence" = absent ] && [ "$retry_after" -gt "$now" ]; then
+		write_status unavailable "No SIM card was detected in $target; disruptive retries are paused." target_sim_absent "$(uci -q get cellular.cellular.hw_sim)" "$next_retry"
+		return 1
+	fi
+	if [ "$presence" = absent ]; then
+		case "$target" in
+			sim1) sim1_presence=unknown; sim1_retry_after=0 ;;
+			sim2) sim2_presence=unknown; sim2_retry_after=0 ;;
+		esac
+		save_state
 	fi
 	return 0
 }
@@ -474,7 +573,8 @@ switch_and_verify() {
 	guard_enabled || return 2
 	now=$(date +%s)
 	emergency=0
-	case "$reason" in sustained_outage|reconnect_loop|secondary_failed) emergency=1 ;; esac
+	case "$reason" in sustained_outage|reconnect_loop|secondary_failed|sim_removed) emergency=1 ;; esac
+	target_slot_available "$target" "$now" || return 4
 	can_switch_now "$now" "$emergency"
 	switch_permission=$?
 	[ "$switch_permission" -eq 0 ] || return "$switch_permission"
@@ -500,10 +600,17 @@ switch_and_verify() {
 			return 2
 		fi
 		record_failed_attempt "$(date +%s)"
+		if [ "$control_status" -eq 10 ]; then
+			mark_slot_absent "$target" "$(date +%s)" 1
+			history_finish target_sim_absent "The modem confirmed that no SIM card is installed in the target slot."
+			write_status unavailable "No SIM card is installed in $target; automatic retries are paused for five minutes." target_sim_absent "$(uci -q get cellular.cellular.hw_sim)" "$next_retry"
+			return 1
+		fi
 		history_finish activation_failed "The target SIM did not activate; the guarded controller completed or attempted rollback."
 		write_status failed "The target SIM did not activate; the guarded controller attempted rollback." activation_failed "$(uci -q get cellular.cellular.hw_sim)" "$next_retry"
 		return 1
 	fi
+	mark_slot_present "$target"
 	write_status verifying "The target SIM registered; proving Internet connectivity before accepting it." "$reason" "$target" "$next_retry"
 	if verify_stable_health; then
 		clear_failed_attempts
@@ -570,6 +677,7 @@ manual_activation() {
 	last_switch=0
 	failed_attempts=0
 	next_switch_attempt=0
+	mark_slot_present "$target"
 	if [ "$target" = "$default_sim" ]; then
 		set_primary_state
 	else
@@ -601,6 +709,8 @@ run_monitor() {
 	write_status monitoring "Monitoring the selected default SIM and reconnect stability." started "$(uci -q get cellular.cellular.hw_sim)" "$next_retry"
 	last_health=unknown
 	failure_since=0
+	absence_candidate=""
+	absence_confirmations=0
 
 	while :; do
 		load_config
@@ -621,6 +731,9 @@ run_monitor() {
 		if health_check; then
 			last_health=up
 			failure_since=0
+			absence_candidate=""
+			absence_confirmations=0
+			[ "$(slot_presence "$active")" = present ] || mark_slot_present "$active"
 			# A proved healthy current path ends the failed-attempt streak. Keep the
 			# daily disruptive-attempt count, but do not make a later independent
 			# outage inherit increasingly long retry backoff.
@@ -655,8 +768,26 @@ run_monitor() {
 			events=$(disconnect_count "$now")
 			reason="sustained_outage"
 			trigger=0
-			[ "$elapsed" -ge "$failure_seconds" ] && trigger=1
-			if [ "$events" -ge "$disconnect_limit" ]; then
+			presence=$(active_sim_presence)
+			if [ "$presence" = absent ]; then
+				if [ "$absence_candidate" = "$active" ]; then
+					absence_confirmations=$((absence_confirmations + 1))
+				else
+					absence_candidate="$active"
+					absence_confirmations=1
+				fi
+				if [ "$absence_confirmations" -ge 2 ]; then
+					mark_slot_absent "$active" "$now"
+					trigger=1
+					reason=sim_removed
+				fi
+			else
+				absence_candidate=""
+				absence_confirmations=0
+				[ "$presence" != present ] || [ "$(slot_presence "$active")" = present ] || mark_slot_present "$active"
+			fi
+			[ "$trigger" -eq 1 ] || [ "$elapsed" -lt "$failure_seconds" ] || trigger=1
+			if [ "$trigger" -ne 1 ] && [ "$events" -ge "$disconnect_limit" ]; then
 				trigger=1
 				reason=reconnect_loop
 			fi
@@ -664,7 +795,7 @@ run_monitor() {
 			if [ "$trigger" -eq 1 ]; then
 				if [ "$active" = "$default_sim" ]; then
 					recovery_result=1
-					if [ "$recover_before_failover" = "1" ]; then
+					if [ "$recover_before_failover" = "1" ] && [ "$reason" != sim_removed ]; then
 						recover_active "$active" "$reason"
 						recovery_result=$?
 					fi
@@ -686,7 +817,9 @@ run_monitor() {
 				else
 					history_trigger_elapsed="$elapsed"
 					history_trigger_events="$events"
-					if switch_and_verify "$default_sim" secondary_failed; then
+					secondary_reason=secondary_failed
+					[ "$reason" != sim_removed ] || secondary_reason=sim_removed
+					if switch_and_verify "$default_sim" "$secondary_reason"; then
 						set_primary_state
 						reset_disconnects
 						failure_since=0

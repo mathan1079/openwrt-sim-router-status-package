@@ -65,6 +65,8 @@
 <div class="simmanager-status">
 	<h3><%:Activation status%></h3>
 	<div class="simmanager-row"><span><%:Current active SIM%></span><strong id="control-active">—</strong></div>
+	<div class="simmanager-row"><span><%:SIM 1 card detection%></span><span id="control-sim1-presence">Not checked</span></div>
+	<div class="simmanager-row"><span><%:SIM 2 card detection%></span><span id="control-sim2-presence">Not checked</span></div>
 	<div class="simmanager-row"><span><%:State%></span><strong id="control-state">Idle</strong></div>
 	<div class="simmanager-row"><span><%:Message%></span><span id="control-message">No activation has been started.</span></div>
 	<div class="simmanager-row"><span><%:Last operation checkpoint%></span><span id="control-backup">N/A</span></div>
@@ -171,6 +173,10 @@
 		if (typeof data.automation_enabled === 'boolean') automationEnabled = data.automation_enabled;
 		if (data.automation_default_sim) automationDefaultSim = data.automation_default_sim;
 		document.getElementById('control-active').textContent = (data.active_sim || 'unknown').toUpperCase();
+		['sim1', 'sim2'].forEach(function(slot) {
+			var presence = (data.sim_presence || {})[slot];
+			document.getElementById('control-' + slot + '-presence').textContent = presence === 'absent' ? '<%:No SIM detected at last check%>' : (presence === 'present' ? '<%:SIM detected at last check%>' : '<%:Not checked%>');
+		});
 		updateActiveCard(data.active_sim);
 		document.getElementById('control-state').textContent = data.state || 'idle';
 		document.getElementById('control-message').textContent = data.message || 'No activation has been started.';

@@ -167,6 +167,7 @@ function action_status()
 	local uci = require "luci.model.uci".cursor()
 	local fs = require "nixio.fs"
 	local status = read_json("/tmp/4ginfo")
+	local automation = read_json("/tmp/simmanager-auto.json")
 	local live = jsonc.parse(sys.exec("/usr/sbin/simmanager-status 2>/dev/null")) or {}
 	local active_sim = uci:get("cellular", "cellular", "hw_sim") or "unknown"
 	local profile_section = (active_sim == "sim1" or active_sim == "sim2") and active_sim or nil
@@ -247,6 +248,7 @@ function action_status()
 		local last_iccid = uci:get("simmanager", slot, "last_iccid")
 		local has_last_known = last_iccid ~= nil and last_iccid ~= ""
 		local details = {
+			presence = automation[slot .. "_presence"] or "unknown",
 			slot = slot,
 			title = uci:get("hw_info", "cellular", slot == "sim2" and "s2_title" or "s_title") or string.upper(slot),
 			active = is_active,
@@ -314,6 +316,8 @@ function action_control_status()
 	payload.automation_enabled = uci:get("simmanager", "automation", "enabled") == "1"
 	payload.automation_default_sim = uci:get("simmanager", "automation", "default_sim") or "sim1"
 	payload.manual_backups = type(history.backups) == "table" and history.backups or {}
+	local automation = read_json("/tmp/simmanager-auto.json")
+	payload.sim_presence = { sim1 = automation.sim1_presence or "unknown", sim2 = automation.sim2_presence or "unknown" }
 	write_json(payload)
 end
 

@@ -100,6 +100,25 @@ end
 local status_data = jsonc.parse(fs.readfile("/tmp/simmanager-auto.json") or "") or {}
 local status = m:section(SimpleSection, nil, translate("Runtime status"))
 
+for _, slot in ipairs({ "sim1", "sim2" }) do
+	local card_slot = slot
+	local presence = status:option(DummyValue, "presence_" .. slot, string.upper(slot) .. " " .. translate("card detection"))
+	presence.cfgvalue = function()
+		local value = status_data[card_slot .. "_presence"]
+		if value == "absent" then return translate("No SIM detected at last check") end
+		if value == "present" then return translate("SIM detected at last check") end
+		return translate("Not checked — standby slot can only be checked when selected")
+	end
+end
+
+local removal_help = status:option(DummyValue, "removal_help", translate("SIM removal protection"))
+removal_help.cfgvalue = function()
+	if uci:get("simmanager", "automation", "enabled") ~= "1" then
+		return translate("Automatic switching is off. Removing a SIM will not trigger automatic failover.")
+	end
+	return translate("Two confirmed no-SIM replies trigger failover. An empty target slot is skipped for five minutes. Unknown replies do not count as removal.")
+end
+
 local state = status:option(DummyValue, "runtime_state", translate("State"))
 state.cfgvalue = function() return status_data.state or translate("Stopped") end
 

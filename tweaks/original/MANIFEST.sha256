@@ -12,7 +12,9 @@ a390a0ce83b5a09b927dee7a6ba6cf8800d509a550078f88456897daecdc18f1  ./metadata/cur
 e63dfe3937e89e18d37ad3000917da5e355dfc6a8a55bd8ab821d04fcf105b89  ./usr/lib/lua/luci/controller/simmanager.lua
 a78772f5952f394cd30d91dae34146935d9da8c7e405bc67b9aa8fc790aaeac7  ./usr/lib/lua/luci/model/cbi/simmanager/automation.lua
 36a68738811313648002b60e8068b5cc3565c94cd8541822173c39f37230636e  ./usr/lib/lua/luci/model/cbi/simmanager/profiles.lua
+3545541acd46ceed38fb9f6798244aa48dc7e87e8635f433070e961932e0bbd3  ./usr/lib/lua/luci/view/simmanager/activation.htm
 940fcc34bd5b742a0457dc776adb811b4c194bf990974fffe42c7edd43d2c43d  ./usr/lib/lua/luci/view/simmanager/automation_history.htm.absent
+e2ac4895b642338d7d7acb2361c86d8040012138b13bc9def3bc5d9fdf282127  ./usr/lib/lua/luci/view/simmanager/dashboard.htm
 8673828af4d3db599536974d842ba29834f86b8a5d22ea76b4452a9761502da6  ./usr/sbin/cellular/cellular_Prepare
 1069fed330bbd5013ef7aaa9fe88ce00583cd5fa113229510a38cb5f9515f812  ./usr/sbin/cellular/cellular_detect
 9cde83908e9b5ba0c80078f8864b47eea65b2b8517b560317ff65739bf5dabff  ./usr/sbin/cellular/quectel_rm500u

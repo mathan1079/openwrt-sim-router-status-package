@@ -1,0 +1,255 @@
+<%+header%>
+
+<style>
+.simmanager-banner { padding: 12px 16px; margin: 0 0 16px; border-left: 4px solid #2b7de9; background: #eef6ff; }
+.simmanager-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+.simmanager-card { border: 1px solid #d8dce2; border-radius: 6px; background: #fff; padding: 14px 16px; }
+.simmanager-card h3 { margin: 0 0 10px; font-size: 1.05rem; }
+.simmanager-modem { border: 1px solid #d8dce2; border-radius: 6px; background: #fff; padding: 14px 16px; margin: 0 0 14px; }
+.simmanager-modem h3 { margin: 0 0 10px; font-size: 1.05rem; }
+.simmanager-modem-fields { display: grid; grid-template-columns: repeat(5, minmax(150px, 1fr)); gap: 0 22px; }
+.simmanager-modem .simmanager-row { border-top: 0; }
+.simmanager-row { display: flex; justify-content: space-between; gap: 16px; padding: 6px 0; border-top: 1px solid #edf0f3; }
+.simmanager-row:first-of-type { border-top: 0; }
+.simmanager-label { color: #667085; }
+.simmanager-value { text-align: right; overflow-wrap: anywhere; }
+.simmanager-signal { height: 8px; background: #e5e7eb; border-radius: 5px; overflow: hidden; margin-top: 8px; }
+.simmanager-signal span { display: block; height: 100%; background: #21a366; width: 0; transition: width .25s ease; }
+.simmanager-muted { color: #667085; }
+.simmanager-error { color: #b42318; }
+.simmanager-slots { display: grid; grid-template-columns: repeat(2, minmax(280px, 1fr)); gap: 14px; margin: 0 0 18px; }
+.simmanager-slot { border: 1px solid #d8dce2; border-radius: 6px; background: #fff; padding: 14px 16px; }
+.simmanager-slot.active { border: 2px solid #21a366; }
+.simmanager-slot-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.simmanager-slot-head h3 { margin: 0; }
+.simmanager-badge { border-radius: 12px; padding: 3px 9px; font-size: .78rem; background: #e5e7eb; color: #475467; }
+.simmanager-badge.active { background: #dff6e8; color: #08783e; }
+@media (max-width: 1100px) { .simmanager-modem-fields { grid-template-columns: repeat(2, minmax(180px, 1fr)); } }
+@media (max-width: 800px) { .simmanager-slots, .simmanager-modem-fields { grid-template-columns: 1fr; } }
+</style>
+
+<h2><%:SIM Manager%></h2>
+<div class="simmanager-banner">
+	<strong><%:Read-only dashboard%></strong><br>
+	<%:This page reads the vendor status cache and query-only modem status. It does not change modem settings, switch SIMs, apply APNs, or restart the modem.%>
+</div>
+
+<div id="simmanager-state" class="simmanager-muted"><%:Loading cellular status…%></div>
+<div id="simmanager-slots" class="simmanager-slots" style="display:none"></div>
+<div id="simmanager-modem" class="simmanager-modem" style="display:none">
+	<h3><%:Modem information%></h3>
+	<div class="simmanager-modem-fields">
+		<div data-field="device_model" data-label="<%:Model%>"></div>
+		<div data-field="imei" data-label="IMEI"></div>
+		<div data-field="iccid" data-label="ICCID"></div>
+		<div data-field="query_port" data-label="<%:Status port%>"></div>
+		<div data-field="updated_at" data-label="<%:Status updated%>"></div>
+	</div>
+</div>
+<div id="simmanager-grid" class="simmanager-grid" style="display:none">
+	<div class="simmanager-card">
+		<h3><%:Measured signal%></h3>
+		<div data-field="signal_percent" data-label="<%:Calculated signal%>"></div>
+		<div data-field="signal_quality" data-label="<%:Quality%>"></div>
+		<div data-field="signal_source" data-label="<%:Calculation source%>"></div>
+		<div class="simmanager-signal"><span id="simmanager-signal-bar"></span></div>
+		<div data-field="rsrp" data-label="RSRP"></div>
+		<div data-field="rsrq" data-label="RSRQ"></div>
+		<div data-field="sinr" data-label="SINR"></div>
+		<div data-field="rssi" data-label="RSSI"></div>
+		<div data-field="nr_rsrp" data-label="5G RSRP"></div>
+		<div data-field="nr_rsrq" data-label="5G RSRQ"></div>
+		<div data-field="nr_sinr" data-label="5G SINR"></div>
+		<div data-field="scan_mode" data-label="<%:Radio mode%>"></div>
+		<div data-field="vendor_signal_percent" data-label="<%:Vendor-reported signal%>"></div>
+		<div data-field="vendor_signal_valid" data-label="<%:Vendor value status%>"></div>
+	</div>
+	<div class="simmanager-card">
+		<h3><%:Tower%></h3>
+		<div data-field="cell_id" data-label="<%:Cell ID%>"></div>
+		<div data-field="pci" data-label="PCI"></div>
+		<div data-field="frequency" data-label="<%:Frequency point%>"></div>
+		<div data-field="lte_band" data-label="<%:LTE band%>"></div>
+		<div data-field="nr_pci" data-label="5G PCI"></div>
+		<div data-field="nr_frequency" data-label="5G NR-ARFCN"></div>
+		<div data-field="nr_band" data-label="<%:5G band%>"></div>
+		<div data-field="registration" data-label="<%:Registration code%>"></div>
+	</div>
+	<div class="simmanager-card">
+		<h3><%:Bands and channels%></h3>
+		<div data-field="current_band" data-label="<%:Current serving bands%>"></div>
+		<div data-field="lte_band" data-label="<%:Serving LTE band%>"></div>
+		<div data-field="frequency" data-label="LTE EARFCN"></div>
+		<div data-field="nr_band" data-label="<%:Serving 5G band%>"></div>
+		<div data-field="nr_frequency" data-label="5G NR-ARFCN"></div>
+		<div data-field="supported_wcdma_bands" data-label="<%:Supported 3G bands%>"></div>
+		<div data-field="supported_lte_bands" data-label="<%:Supported LTE bands%>"></div>
+		<div data-field="supported_nsa_5g_bands" data-label="<%:Supported 5G NSA bands%>"></div>
+		<div data-field="supported_sa_5g_bands" data-label="<%:Supported 5G SA bands%>"></div>
+	</div>
+</div>
+
+<script type="text/javascript">
+//<![CDATA[
+(function() {
+	var endpoint = '<%=luci.dispatcher.build_url("admin", "simmanager", "status")%>';
+	var modeNames = {
+		'0':'2G', '1':'2G', '2':'2G', '3':'2G', '4':'2G', '5':'2G', '6':'2G',
+		'7':'4G', '8':'5G', '9':'5G', '10':'5G NSA', '11':'5G SA', '12':'5G SA',
+		'13':'5G NSA', '14':'5G', '15':'5G', '16':'5G'
+	};
+	var qualityNames = {
+		'excellent':'<%:Excellent%>', 'good':'<%:Good%>', 'fair':'<%:Fair%>',
+		'poor':'<%:Poor%>', 'very_poor':'<%:Very poor%>'
+	};
+
+	function present(value) {
+		return value !== null && value !== undefined && String(value).trim() !== '';
+	}
+
+	function formatLocalTime(epoch) {
+		var date = new Date(Number(epoch) * 1000);
+		if (!Number(epoch) || isNaN(date.getTime())) return 'N/A';
+		function pad(value) { return value < 10 ? '0' + value : String(value); }
+		var hours = date.getHours();
+		var zone = '';
+		try {
+			var parts = new Intl.DateTimeFormat(undefined, { timeZoneName: 'short' }).formatToParts(date);
+			for (var i = 0; i < parts.length; i++) if (parts[i].type === 'timeZoneName') zone = parts[i].value;
+		} catch (e) {}
+		return date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate()) +
+			' ' + pad(hours % 12 || 12) + ':' + pad(date.getMinutes()) + ':' + pad(date.getSeconds()) +
+			' ' + (hours >= 12 ? 'PM' : 'AM') + (zone ? ' ' + zone : '');
+	}
+
+	function displayValue(field, data) {
+		var value = data[field];
+		if (field === 'active_sim' && present(value)) {
+			return (data.active_sim_title || String(value).toUpperCase());
+		}
+		if (field === 'phone_number' && present(value)) {
+			return value + (data.phone_number_source === 'profile' ? ' (profile)' : '');
+		}
+		if (field === 'network_mode' && present(value)) return modeNames[String(value)] || value;
+		if (field === 'signal_percent' && present(value)) return value + '%';
+		if (field === 'signal_quality' && present(value)) return qualityNames[value] || value;
+		if (field === 'signal_source' && present(value)) {
+			return value === 'direct_modem_rsrp' ? '<%:Direct modem LTE RSRP%>' :
+				(value === 'vendor_rsrp' ? '<%:Vendor LTE RSRP%>' : '<%:Unavailable%>');
+		}
+		if (field === 'vendor_signal_percent' && present(value)) return value + '%';
+		if (field === 'vendor_signal_valid') {
+			return value === true ? '<%:Valid RSRP source%>' : '<%:Ignored — vendor RSRP is zero or unavailable%>';
+		}
+		if ((field === 'rsrp' || field === 'rssi' || field === 'nr_rsrp') && present(value)) return value + ' dBm';
+		if ((field === 'rsrq' || field === 'sinr' || field === 'nr_rsrq' || field === 'nr_sinr') && present(value)) return value + ' dB';
+		if (field === 'lte_band' && present(value)) return 'B' + value;
+		if (field === 'nr_band' && present(value)) return 'n' + value;
+		if (field === 'supported_wcdma_bands' && present(value)) return String(value).split(':').map(function(b) { return 'B' + b; }).join(', ');
+		if (field === 'supported_lte_bands' && present(value)) return String(value).split(':').map(function(b) { return 'B' + b; }).join(', ');
+		if ((field === 'supported_nsa_5g_bands' || field === 'supported_sa_5g_bands') && present(value)) return String(value).split(':').map(function(b) { return 'n' + b; }).join(', ');
+		if (field === 'updated_at' && present(value)) return formatLocalTime(value);
+		return present(value) ? value : 'N/A';
+	}
+
+	function addSlotRow(card, labelText, valueText) {
+		var row = document.createElement('div');
+		row.className = 'simmanager-row';
+		var label = document.createElement('span');
+		label.className = 'simmanager-label';
+		label.textContent = labelText;
+		var value = document.createElement('span');
+		value.className = 'simmanager-value';
+		value.textContent = present(valueText) ? valueText : 'N/A';
+		row.appendChild(label);
+		row.appendChild(value);
+		card.appendChild(row);
+	}
+
+	function renderSlots(data) {
+		var container = document.getElementById('simmanager-slots');
+		container.textContent = '';
+		var slots = data.sims || {};
+		['sim1', 'sim2'].forEach(function(key) {
+			var sim = slots[key] || { title: key.toUpperCase(), active: false };
+			var card = document.createElement('div');
+			card.className = 'simmanager-slot' + (sim.active ? ' active' : '');
+			var head = document.createElement('div');
+			head.className = 'simmanager-slot-head';
+			var title = document.createElement('h3');
+			title.textContent = sim.title || key.toUpperCase();
+			var badge = document.createElement('span');
+			badge.className = 'simmanager-badge' + (sim.active ? ' active' : '');
+			badge.textContent = sim.active ? (sim.transitioning ? '<%:Active — refreshing data%>' : '<%:Active — live data%>') : (sim.last_known ? '<%:Inactive — last known data%>' : '<%:Inactive — profile data%>');
+			head.appendChild(title);
+			head.appendChild(badge);
+			card.appendChild(head);
+			addSlotRow(card, '<%:Profile%>', sim.profile_name);
+			addSlotRow(card, '<%:Card detection%>', sim.presence === 'absent' ? '<%:No SIM detected at last check%>' : (sim.presence === 'present' ? '<%:SIM detected at last check%>' : '<%:Not checked — standby slot can only be checked when selected%>'));
+			addSlotRow(card, '<%:Phone number%>', sim.phone_number ? sim.phone_number + (sim.phone_number_source === 'profile' ? ' (profile)' : '') : null);
+			var waiting = sim.transitioning ? '<%:Refreshing active SIM data…%>' : '<%:Available when active%>';
+			addSlotRow(card, '<%:Operator%>', sim.operator || waiting);
+			addSlotRow(card, 'ICCID', sim.iccid || waiting);
+			addSlotRow(card, '<%:SIM status%>', sim.sim_status ? (sim.active ? sim.sim_status : sim.sim_status + ' (last known)') : waiting);
+			addSlotRow(card, '<%:Current APN%>', sim.current_apn ? (sim.active ? sim.current_apn : sim.current_apn + ' (last known)') : waiting);
+			addSlotRow(card, '<%:Configured APN%>', sim.apn_auto === '1' ? '<%:Automatic%>' : sim.profile_apn);
+			addSlotRow(card, '<%:PDP type%>', sim.pdp_type);
+			addSlotRow(card, '<%:Preferred network%>', sim.network_mode);
+			addSlotRow(card, '<%:Preferred bands%>', sim.band_auto === '1' ? '<%:Automatic%>' : sim.bands);
+			addSlotRow(card, sim.active ? '<%:Live signal%>' : '<%:Last known signal%>', present(sim.signal_percent) ? sim.signal_percent + '%' : waiting);
+			addSlotRow(card, sim.active ? '<%:Current bands%>' : '<%:Last known bands%>', sim.current_band || waiting);
+			if (!sim.active && sim.last_known && present(sim.last_seen)) addSlotRow(card, '<%:Last observed%>', formatLocalTime(sim.last_seen));
+			container.appendChild(card);
+		});
+		container.style.display = 'grid';
+	}
+
+	function render(data) {
+		var state = document.getElementById('simmanager-state');
+		var grid = document.getElementById('simmanager-grid');
+		var modem = document.getElementById('simmanager-modem');
+		if (!data || !data.available) {
+			grid.style.display = 'none';
+			modem.style.display = 'none';
+			state.className = 'simmanager-error';
+			state.textContent = '<%:Cellular status is unavailable. The vendor /tmp/4ginfo cache has not been created yet.%>';
+			return;
+		}
+
+		renderSlots(data);
+
+		var fields = document.querySelectorAll('#simmanager-modem [data-field], #simmanager-grid [data-field]');
+		for (var i = 0; i < fields.length; i++) {
+			var holder = fields[i];
+			var key = holder.getAttribute('data-field');
+			holder.className = 'simmanager-row';
+			holder.textContent = '';
+			var label = document.createElement('span');
+			label.className = 'simmanager-label';
+			label.textContent = holder.getAttribute('data-label');
+			var value = document.createElement('span');
+			value.className = 'simmanager-value';
+			value.textContent = displayValue(key, data);
+			holder.appendChild(label);
+			holder.appendChild(value);
+		}
+
+		var signal = Math.max(0, Math.min(100, Number(data.signal_percent) || 0));
+		document.getElementById('simmanager-signal-bar').style.width = signal + '%';
+		state.style.display = 'none';
+		modem.style.display = 'block';
+		grid.style.display = 'grid';
+	}
+
+	XHR.poll(5, endpoint, null, function(xhr, data) {
+		if (!data) {
+			try { data = JSON.parse(xhr.responseText); } catch (e) { data = null; }
+		}
+		render(data);
+	});
+})();
+//]]>
+</script>
+
+<%+footer%>
+

@@ -185,6 +185,7 @@
 			head.appendChild(badge);
 			card.appendChild(head);
 			addSlotRow(card, '<%:Profile%>', sim.profile_name);
+			addSlotRow(card, '<%:Card detection%>', sim.presence === 'absent' ? '<%:No SIM detected at last check%>' : (sim.presence === 'present' ? '<%:SIM detected at last check%>' : '<%:Not checked — standby slot can only be checked when selected%>'));
 			addSlotRow(card, '<%:Phone number%>', sim.phone_number ? sim.phone_number + (sim.phone_number_source === 'profile' ? ' (profile)' : '') : null);
 			var waiting = sim.transitioning ? '<%:Refreshing active SIM data…%>' : '<%:Available when active%>';
 			addSlotRow(card, '<%:Operator%>', sim.operator || waiting);

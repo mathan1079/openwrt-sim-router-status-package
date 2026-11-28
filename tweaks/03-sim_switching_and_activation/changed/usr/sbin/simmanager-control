@@ -177,12 +177,20 @@ wait_for_sim_ready() {
 	query_port=/dev/ttyUSB3
 	[ -c "$query_port" ] || query_port=$(uci -q get cellular.cellular.atdev)
 	count=0
+	absent_count=0
 	while [ "$count" -lt 30 ]; do
 		[ "$ignore_guard" = rollback ] || automation_allowed || return 1
 		# A routed 2-of-3 Internet proof is stronger evidence than a CPIN
 		# query and prevents a busy AT port from holding a completed switch.
 		activation_health_check && return 0
-		locked_at "$query_port" 'AT+CPIN?' 2>/dev/null | tr -d '\r' | grep -q '+CPIN: READY' && return 0
+		cpin_reply=$(locked_at "$query_port" 'AT+CPIN?' 2>/dev/null | tr -d '\r')
+		printf '%s\n' "$cpin_reply" | grep -q '+CPIN: READY' && return 0
+		if printf '%s\n' "$cpin_reply" | grep -Eqi 'SIM (not inserted|not present)|NOT INSERTED|\+CME ERROR:[[:space:]]*10([^0-9]|$)'; then
+			absent_count=$((absent_count + 1))
+			[ "$absent_count" -lt 2 ] || return 10
+		else
+			absent_count=0
+		fi
 		count=$((count + 1))
 		sleep 2
 	done
@@ -307,9 +315,10 @@ finish_failed_activation() {
 	success_state="$3"
 	success_message="$4"
 	critical_message="$5"
+	restored_status="${6:-1}"
 	if restore_backup "$backup"; then
 		write_status "$success_state" "$success_message" "$target" "$backup"
-		return 1
+		return "$restored_status"
 	fi
 	# Exit 3 is reserved for an activation failure whose rollback also failed.
 	# The automatic controller treats this as an unsafe state and disables itself.
@@ -390,11 +399,24 @@ activate_profile() {
 			return $?
 		fi
 		write_status switching "Switching the SIM through the existing vendor mechanism." "$target" "$backup"
-		if ! vendor_switch "$target" || ! wait_for_sim_ready; then
-			write_status rolling_back "SIM switch did not become ready; restoring the previous SIM and configuration." "$target" "$backup"
-			finish_failed_activation "$target" "$backup" failed \
-				"SIM switch failed. The previous SIM and configuration were restored." \
-				"SIM switch failed and rollback could not restore verified connectivity."
+		switch_status=0
+		vendor_switch "$target" || switch_status=1
+		if [ "$switch_status" -eq 0 ]; then
+			wait_for_sim_ready
+			switch_status=$?
+		fi
+		if [ "$switch_status" -ne 0 ]; then
+			if [ "$switch_status" -eq 10 ]; then
+				write_status rolling_back "No SIM card was detected in $target; restoring the previous SIM and configuration." "$target" "$backup"
+				finish_failed_activation "$target" "$backup" sim_absent \
+					"No SIM card is installed in $target. The previous SIM and configuration were restored." \
+					"No SIM card is installed in $target and rollback could not restore verified connectivity." 10
+			else
+				write_status rolling_back "SIM switch did not become ready; restoring the previous SIM and configuration." "$target" "$backup"
+				finish_failed_activation "$target" "$backup" failed \
+					"SIM switch failed. The previous SIM and configuration were restored." \
+					"SIM switch failed and rollback could not restore verified connectivity."
+			fi
 			return $?
 		fi
 		did_switch=1
